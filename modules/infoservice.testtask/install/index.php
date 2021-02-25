@@ -2,6 +2,7 @@
 use Bitrix\Main\{
     Localization\Loc,
     Loader,
+    EventManager,
     Config\Option
 };
 use Infoservice\TestTask\EventHandles\Employment;
@@ -20,6 +21,44 @@ class infoservice_testtask extends CModule
     protected $definedContants;
 
     protected static $defaultSiteID;
+
+    /**
+     * Описание обработчиков событий. Под "ключом" указывается название другого модуля, события которого
+     * нужно обрабатывать, в "значении" указывается массив с названиями классов этого модуля, которые
+     * будут отвечать за обработку событий. Сам класс для обработки событий находится в папке lib модуля.
+     * У названия класса не надо указывать пространство имен, кроме той части, что идет после
+     * названий партнера и модуля. Для обработки конкретных событий эти классы должны иметь
+     * статические и открытые методы с такими же названиями, что и события
+     * 
+     * Для создания обработчиков к конкретному highloadblock-у необходимо писать их названия
+     * как <символьное имя highloadblock><название события>, например, для события OnAdd
+     * у highloadblock с символьным именем Test такой обработчик должен называться TestOnAdd.
+     * 
+     * Ананлогично, как и для highloadblock-ов, обработчики событий пишутся и для всех ORM-классов
+     * Битрикса, т.е. тех классов, чье имя преставляет шаблон <Приставка класса>Table, где
+     * <Приставка класса> это обычно название таблицы в БД, и эту <Приставку класса> можно
+     * использовать как приставку к названиям обработчиков событий для ORM-класса, например,
+     * <Приставка класса>OnAdd
+     */
+    const EVENTS_HANDLES = [
+        /**
+         * Примеры регистрации обработчиков событий, соми классы надо искать в
+         * папке lib/eventhandles
+         */
+        'socialnetwork' => ['EventHandles\\SocNetGroupHandle'],
+        'main' => ['EventHandles\\UserEventHandle'],
+
+        /**
+         * Класс IBlockSectionEventHandle особенный, он берет на себя все события
+         * как элементов инфоблока, так и разделов. Для создания класса с обработчиком
+         * событий конкретного инфоблока, достаточно просто создать в папке lib/eventhandles
+         * файл с классом, чье имя совпадает с символьным кодом инфоблока, чьи события
+         * хочется обработать, добавить в этот класс один из public-методов, которые
+         * обрабатывают события, из класса IBlockSectionEventHandle или IBlockElementEventHandle,
+         * и решать задачу
+         */
+        'iblock' => ['EventHandles\\IBlockSectionEventHandle'],
+    ];
 
     /**
      * Запоминает и возвращает настоящий путь к текущему классу
@@ -123,6 +162,36 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Регистрация обработчиков событий
+     * 
+     * @return void
+     */
+    protected function initEventHandles()
+    {
+        $eventManager = EventManager::getInstance();
+        $eventsHandles = [];
+        foreach ($this->getModuleConstantValue('EVENTS_HANDLES') as $moduleName => $classNames) {
+            foreach ($classNames as $className) {
+                $classNameValue = $this->nameSpaceValue . '\\' . $className;
+                if (!class_exists($classNameValue)) continue;
+
+                $registerModuleName = $moduleName == 'highloadblock' ? '' : $moduleName;
+                $reflectionClass = new ReflectionClass($classNameValue);
+                foreach ($reflectionClass->getMethods() as $method) {
+                    if (!$method->isPublic() || !$method->isStatic()) continue;
+
+                    $eventName = $method->getName();
+                    $eventsHandles[$moduleName][$eventName][] = $className;
+                    $eventManager->registerEventHandler(
+                        $registerModuleName, $eventName, $this->MODULE_ID, $classNameValue, $eventName
+                    );
+                }
+            }
+        }
+        $this->optionClass::setEventsHandles($eventsHandles);
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
@@ -151,6 +220,7 @@ class infoservice_testtask extends CModule
      */
     protected function runInstallMethods()
     {
+        $this->initEventHandles();
     }
 
     /**
@@ -217,12 +287,38 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Удаление всех зарегистрированных модулем обработчиков событий
+     * 
+     * @return void
+     */
+    protected function removeEventHandles()
+    {
+        $eventManager = EventManager::getInstance();
+        foreach ($this->optionClass::getEventsHandles() as $moduleName => $eventList) {
+            foreach (array_keys($eventList) as $eventName) {
+                foreach (
+                    $eventManager->findEventHandlers(
+                        strtoupper($moduleName),
+                        strtoupper($eventName),
+                        ['TO_MODULE_ID' => $this->MODULE_ID]
+                    ) as $handle) {
+
+                        $eventManager->unRegisterEventHandler(
+                            $moduleName, $eventName, $this->MODULE_ID, $handle['TO_CLASS'], $handle['TO_METHOD']
+                        );
+                }
+            }
+        }
+    }
+
+    /**
      * Выполняется основные операции по удалению модуля
      * 
      * @return void
      */
     protected function runRemoveMethods()
     {
+        $this->removeEventHandles();
     }
 
     /**
