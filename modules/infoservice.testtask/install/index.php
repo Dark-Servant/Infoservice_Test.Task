@@ -20,6 +20,44 @@ class infoservice_testtask extends CModule
     protected $definedContants;
 
     protected static $defaultSiteID;
+    const SAVE_OPTIONS_WHEN_DELETED = true;
+
+    /**
+     * Опции, которые необходимо добавить в проект, сгруппированы по названиям, которые будут использоваться
+     * в имени метода для их добавления. Опции описываются как ассоциативный массив, где "ключ" - центральная
+     * часть имени метода, который будет вызван для добавления/удаления опций той группы, чье имя указано
+     * в "ключе".
+     * Для того, чтобы была инициализация опций в конкретной группе или их обработка перед удалением, необходимо
+     * создать методы init<"Ключ">Options и remove<"Ключ">Options.
+     * В каждой группе опций, которые так же оформлены, как ассоциативный массив,
+     *      "ключ" - название константы, которая хранит название опции, эта константа должна быть объявлена в
+     *      файле include.php у модуля, в этом "ключе" обычно описывается символьное имя элемента
+     *      "значение" - настройки для инициализации каждого элемента из группы опций.
+     * Итоговые данные элементов из групп опций после добавления будут сохранены в опциях модуля, каждый в
+     * своей группе, для обращения к ним надо использовать класс Helpers\Options и методы по шаблону
+     *     get<"Название группы опций">(<название конкретного элемента, необязательный параметр>)
+     *
+     * Если объявить в классе константу SAVE_OPTIONS_WHEN_DELETED со значением true, то все данные, добавленные
+     * при установке модуля, при удалении модуля будут сохранены в системе и снова будут использоваться без
+     * переустановки при новой установке модуля. Эта возможность автоматически унаследуется и для дочених модулей,
+     * но эту константу можно переобъявить в дочерних модулях, изменив там необходимость сохранения данных
+     * при удалении модуля
+     * 
+     * ВНИМАНИЕ. Не стоит в каждой группе объявлять настройки для более одного элемента группы под именем константы
+     * в "ключе", пусть и со своим уникальным именем, но с тем же самым "значением" константы, иначе после установки
+     * модуль просто потеряет все, кроме последнего, установленные данные по этому "значению", что может привести к
+     * багу, а так же после удаления модуля в системе останется мусор, т.е. информация, которую модуль установил,
+     * но не смог удалить при своем удалении, так как ничего о ней не знал. Настройки для каждого элемента той же
+     * самой группы должны храниться под "ключом", который является именем константы, "значение" которой уникально для
+     * этой группы данных. Для некоторых групп данных, например, свойств инфоблоков, полей списка предусмотрено
+     * использование в "значении" префикса, отделенного точкой, сам префикс при установке элемента группы игнорируется,
+     * а при хранении в опциях модуля позволяет избежать перезаписи информации установленного элемента группы информацией
+     * о другом установленном элементе той же группы. Для элементов других групп нельзя использовать константы с тем же
+     * самым "значением", но то же "значение" под любым именем константы в той же самой группе данных можно будет
+     * использовать в следующем модуле. 
+     */
+    const OPTIONS = [
+    ];
 
     /**
      * Запоминает и возвращает настоящий путь к текущему классу
@@ -123,6 +161,37 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Создание всех опций
+     *
+     * @return  void
+     */
+    protected function initOptions() 
+    {
+        $savedData = [];
+        $saveDataWhenDeleted = constant(get_called_class() . '::SAVE_OPTIONS_WHEN_DELETED') === true;
+        if ($saveDataWhenDeleted)
+            $savedData = json_decode(Option::get('main', 'saved.' . $this->MODULE_ID, false, \CSite::GetDefSite()), true)
+                       ?: [];
+
+        foreach ($this->getModuleConstantValue('OPTIONS') as $methodNameBody => $optionList) {
+            $methodName = 'init' . $methodNameBody . 'Options';
+            if (!method_exists($this, $methodName)) continue;
+
+            foreach ($optionList as $constName => $optionValue) {
+                if (!defined($constName)) return;
+
+                $constValue = constant($constName);
+                $value = empty($savedData[$methodNameBody][$constValue])
+                       ? $this->$methodName($constName, $optionValue)
+                       : $savedData[$methodNameBody][$constValue];
+                if (!isset($value)) continue;
+                $optionMethod = 'add' . $methodNameBody;
+                $this->optionClass::$optionMethod($constValue, $value);
+            }
+        }
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
@@ -151,6 +220,7 @@ class infoservice_testtask extends CModule
      */
     protected function runInstallMethods()
     {
+        $this->initOptions();
     }
 
     /**
@@ -217,12 +287,46 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Удаление всех созданных модулем данных согласно прописанным настройкам в
+     * OPTIONS
+     * 
+     * @return void
+     */
+    protected function removeOptions() 
+    {
+        $saveDataWhenDeleted = constant(get_called_class() . '::SAVE_OPTIONS_WHEN_DELETED') === true;
+        $savedData = [];
+        foreach (array_reverse($this->getModuleConstantValue('OPTIONS')) as $methodNameBody => $optionList) {
+            $methodName = $saveDataWhenDeleted && !in_array(strtolower($methodNameBody), ['agents'])
+                        ? 'get' . $methodNameBody
+                        : 'remove' . $methodNameBody . 'Options';
+
+            foreach ($optionList as $constName => $optionValue) {
+                if (!defined($constName)) continue;
+
+                if ($saveDataWhenDeleted) {
+                    $constValue = constant($constName);
+                    $data = $this->optionClass::$methodName($constValue);
+                    if (empty($data)) continue;
+                    $savedData[$methodNameBody][$constValue] = $data;
+
+                } elseif (method_exists($this, $methodName)) {
+                    $this->$methodName($constName, $optionValue);
+                }
+            }
+        }
+        if (!empty($savedData))
+            Option::set('main', 'saved.' . $this->MODULE_ID, json_encode($savedData));
+    }
+
+    /**
      * Выполняется основные операции по удалению модуля
      * 
      * @return void
      */
     protected function runRemoveMethods()
     {
+        $this->removeOptions();
     }
 
     /**
