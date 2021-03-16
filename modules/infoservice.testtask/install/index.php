@@ -154,23 +154,6 @@ class infoservice_testtask extends CModule
     }
 
     /**
-     * Устанавливает модуль, но сначала проверяет не является ли он
-     * дочерним, а, если это так, то при условии, что родительские модули
-     * не установлены, сначала устанавливает их
-     * 
-     * @return void
-     */
-    protected function initFullInstallation()
-    {
-        set_time_limit(0);
-        $parentClassName = get_parent_class(get_called_class());
-        if (($parentClassName != 'CModule') && !(new $parentClassName())->IsInstalled())
-            (new $parentClassName())->DoInstall(false);
-
-        RegisterModule($this->MODULE_ID);
-    }
-
-    /**
      * Проверяет у модуля наличие класса Employment в своем подпространстве имен EventHandles,
      * а так же наличие у него метода, название которого передано в параметре $methodName.
      * В случае успеха вызывает метод у своего Employment
@@ -198,7 +181,7 @@ class infoservice_testtask extends CModule
     public function DoInstall(bool $stopAfterInstall = true) 
     {
         global $APPLICATION;
-        $this->initFullInstallation();
+        RegisterModule($this->MODULE_ID);
         $this->initDefinedContants();
 
         try {
@@ -255,25 +238,6 @@ class infoservice_testtask extends CModule
     }
 
     /**
-     * Проверяет, есть ли у модуля дочернии модули среди установленных.
-     * Если такие есть, то сначала удаляются они
-     * 
-     * @return void
-     */
-    protected function killAllChildren()
-    {
-        $className = get_called_class();
-        $modules = self::GetList();
-        while ($module = $modules->Fetch()) {
-            $childClass = str_replace('.', '_', $module['ID']);
-            if (!class_exists($childClass) || (get_parent_class($childClass) != $className))
-                continue;
-
-            (new $childClass())->DoUninstall(false);
-        }
-    }
-
-    /**
      * Функция, вызываемая при удалении модуля
      *
      * @param bool $stopAfterDeath - указывает модулю остановить после
@@ -284,7 +248,6 @@ class infoservice_testtask extends CModule
     public function DoUninstall(bool $stopAfterDeath = true) 
     {
         global $APPLICATION;
-        $this->killAllChildren();
         Loader::IncludeModule($this->MODULE_ID);
         Employment::setBussy();
         $this->checkAndRunModuleEvent('onBeforeModuleRemovingMethods');
