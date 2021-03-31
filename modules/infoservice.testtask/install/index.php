@@ -123,6 +123,108 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Возвращает список констант модуля в виде массива, где
+     *  "ключ" - название константы в нижнем регистре, спереди и в конце названия указаны символы, переданные
+     *           в параметре $quotes, т.е., если в $quotes указан один символ, то он будет с обоих сторон названия
+     *           "ключа", если символов в $quotes больше, то спереди будет первая половина, в конце вторая половина
+     *           этих символов. Например, при значении $quotes равном "{{}}" название некой константы будет представлено
+     *           в "ключе" как "{{некая_константа}}", для значения "1234" будет результат "12некая_константа34" и т.д.
+     *  "значение" - значение конкретной константы
+     *
+     * Метод полезен там, где требуется заменить в каком-то значение название какой-то конкретной константы на ее значение.
+     * По-умолчанию, к списку указанных в модуле констант добавляется и параметр с "ключом", равным "module_id", и "значением",
+     * равным символьному ID модуля
+     *
+     * @param string $quotes - символы для выделения названия каждой константы модуля, по-умолчанию принимает значение "[]",
+     * оно же берется, если передано пустое значение
+     *
+     * @return array
+     */
+    protected function getPreparedContantsForReplacing(string $quotes = '[]')
+    {
+        if (empty($quotes)) $quotes = '[]';
+
+        $startSym = $endSym = $quotes;
+        if ($quoteCenter = strlen($quotes) >> 1) {
+            $startSym = substr($quotes, 0, $quoteCenter);
+            $endSym = substr($quotes, $quoteCenter);
+        }
+        $resultDefinedContants = [];
+        foreach ($this->definedContants as $code => $value) {
+            if (!preg_match('/^\w+$/', $code)) continue;
+
+            $resultDefinedContants[$startSym . strtolower($code) . $endSym] = $value;
+        }
+        return [$startSym . 'module_id' . $endSym => basename(dirname($this->moduleClassPath))] + $resultDefinedContants;
+    }
+
+    /**
+     * Функция-генератор, по списку переданных файлов делает предобработку названия каждого файла
+     * и возвращает  обработанное название файла, рарзделенный на части путь к файлу и его длину.
+     * Благодаря второму параметру exclude, в котором указываются пути для исключений, можно отбросить
+     * все переданные в списке файлы, путь к которым введен в эти пути для исключения
+     * 
+     * @param array $files - список файлов
+     * @param array $exclude - пути для исключения файлов
+     * @param array $definedContants - массив с константами, которые надо заменить в именах списка файлов.
+     * Сами константы в файлах должны быть указаны как
+     * [<имя константы только из букв латинского алфавита, подчеркивания и цифр>]
+     * По-умолчанию, обрабатывается и константа [module_id] с заменой на идентификатор модуля
+     */
+    protected function getFileParts(array $files, array $exclude = [], array $definedContants = [])
+    {
+        $resultDefinedContants = $this->getPreparedContantsForReplacing();
+        $excludeFiles = array_map(
+            function($eFile) use($resultDefinedContants) {
+                $parts = preg_split('/[\\\\\/]+/', strtr(strtolower(trim($eFile , '\\/')), $resultDefinedContants));
+                return ['count' => count($parts), 'parts' => $parts, 'path' => implode('/', $parts)];
+            }, $exclude
+        );
+        $categories = [];
+        $fileList = [];
+        foreach ($files as $fileCategory => $categoryFiles) {
+            $categoryData = is_array($categoryFiles) ? $categoryFiles : [$categoryFiles];
+            $fileList = array_merge($fileList, $categoryData);
+            if (is_string($fileCategory)) {
+                $fileCategoryName = strtolower($fileCategory);
+                $categories[$fileCategoryName] = array_merge($categories[$fileCategoryName] ?? [], $categoryData);
+            }
+        }
+        $categoryCodes = array_keys($categories);
+
+        foreach (array_unique($fileList) as $moduleFile) {
+            $fileTarget =  strtolower(preg_replace('/[\\\\\/]+/', '/', trim($moduleFile , '\\/')));
+            $resultFileTarget = strtr($fileTarget, $resultDefinedContants);
+            $fileParts = explode('/', $resultFileTarget);
+            $filePartsSize = count($fileParts);
+            if (
+                count(array_filter(
+                    $excludeFiles,
+                    function($ePath) use($resultFileTarget, $fileParts, $filePartsSize) {
+                        if ($ePath['count'] <= $filePartsSize) {
+                            return implode('/', array_slice($fileParts, 0, $ePath['count'])) == $ePath['path'];
+
+                        } else {
+                            return $resultFileTarget == implode('/', array_slice($ePath['parts'], 0, $filePartsSize));
+                        }
+                    }
+                ))
+            ) continue;
+            yield [
+                'target' => preg_replace('/\/+/', '/', preg_replace('/\[\w+\]/', '', $fileTarget)),
+                'parts' => $fileParts,
+                'count' => $filePartsSize,
+                'categories' => array_filter(
+                                    $categoryCodes,
+                                    function($category) use($categories, $moduleFile) {
+                                        return in_array($moduleFile, $categories[$category]);
+                                    }
+                                )
+            ];
+        }
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
@@ -213,6 +315,70 @@ class infoservice_testtask extends CModule
                 Loc::getMessage($this->subLocTitle . 'MODULE_NOT_INSTALLED'),
                 $this->moduleClassPath . '/error.php'
             );
+        }
+    }
+
+    /**
+     * Удаляет файл, а затем папку, в которой он лежит, если в ней больше ничего нет,
+     * после чего по такому же принципу удаляет все родительские папки до папки local
+     * 
+     * @param string $fileTarget - относительный путь к файлу
+     * @param string $where - начальный путь к файлу
+     * @return void
+     */
+    protected static function deleteEmptyPath(string $fileTarget, string $where)
+    {
+        $result = $where . $fileTarget;
+        if (is_link($result) || !is_dir($result)) {
+            @unlink($result) || rmdir($result);
+
+        } else {
+            rmdir($result);
+        }
+
+        $toDelete = true;
+        while ($toDelete && ($fileTarget = preg_replace('/\/?[^\/]+$/', '', $fileTarget))) {
+            $result = $where . $fileTarget;
+            $dUnit = opendir($result);
+            while ($fUnit = readdir($dUnit)) {
+                if (($fUnit == '.') || ($fUnit == '..')) continue;
+
+                $toDelete = false;
+                break;
+            }
+            closedir($dUnit);
+            if ($toDelete) rmdir($result);
+        }
+    }
+
+    /**
+     * Удаляет файлы, которые были созданы модулем как символьная ссылка на такой же файл в модуле.
+     * Вызывает callback-функцию, если она была передана, с обработанным названием файла
+     * 
+     * @param array $files - список файлов из папки модуля с установочным файлом index.php
+     * @param string $from - относительный путь к подпапке из папки модуля с установочным файлом index.php, где
+     * должны лежать указанные в $files файлы
+     * @param string $where - путь относительно корня сайта, где будут проверяться и удаляться файлы
+     * @param array $definedContants - массив с константами, которые надо заменить в именах списка файлов.
+     * Сами константы в файлах должны быть указаны как
+     * [<имя константы только из букв латинского алфавита, подчеркивания и цифр>]
+     * По-умолчанию, обрабатывается и константа [module_id] с заменой на идентификатор модуля
+     * 
+     * @param $callback - необязательный обработчик для каждого файла модуля. Передаются, если будет указан,
+     * два параметра - имя файла из модуля и параметры установленного файла в виде массива, где
+     *     <result> - имя файла, который был установлен в системе
+     *     <old> - имя файла, которые было ранее до установленного, а теперь переименовано
+     * @return void
+     */
+    protected function removeFiles(array $files, string $from, string $where, array $definedContants, $callback = null)
+    {
+        $fromPath = $this->moduleClassPath  . (trim($from) ? '/' : '') . trim($from) . '/';
+        $wherePath = $_SERVER['DOCUMENT_ROOT'] . (trim($where) ? '/' : '') . trim($where) . '/';
+        foreach ($files as $moduleFile => $moduleResult) {
+            if (file_exists($fromPath . $moduleFile) && is_link($wherePath . $moduleResult['result']))
+                self::deleteEmptyPath($moduleResult['result'], $wherePath);
+
+            if (is_callable($callback)) $callback($moduleFile, $moduleResult);
         }
     }
 
