@@ -21,6 +21,27 @@ class infoservice_testtask extends CModule
 
     protected static $defaultSiteID;
 
+    // Правила обработки адресов
+    const GROUP_ADDR_RULE = [
+        /**
+         * ЧПУ для новых пунктов меню группы,
+         *  "ключ" - регулярное выражение,
+         *  "значение" - массив с параметрами
+         *      FILE - путь к файлу
+         *      PARAMS - параметры запроса
+         * Для "ключей" "FILE" и "PARAMS" в "значениях" можно вставлять значения констант модуля, указывая их имена, выделенные
+         * кваратными скобками
+         * [infs_..._module_id] - пример, как надо использовать константы (многоточие это какое-то специальное слово модуля),
+         * Так же по-умолчанию доступно [module_id], которое заменяется на идентификатор модуля
+         * 
+         * Сами настройки правил в самом Битриксе надо искать по адресу /bitrix/admin/urlrewrite_list.php
+         */
+        '#^/test/first/(\d+)\/second\/(\d+)/?(?:\?(\S*))?$#' => [
+            'FILE' => '/local/modules/[module_id]/install/test/index.php',
+            'PARAMS' => 'first=$1&second=$2&$3'
+        ]
+    ];
+
     /**
      * Запоминает и возвращает настоящий путь к текущему классу
      * 
@@ -123,6 +144,75 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Возвращает список констант модуля в виде массива, где
+     *  "ключ" - название константы в нижнем регистре, спереди и в конце названия указаны символы, переданные
+     *           в параметре $quotes, т.е., если в $quotes указан один символ, то он будет с обоих сторон названия
+     *           "ключа", если символов в $quotes больше, то спереди будет первая половина, в конце вторая половина
+     *           этих символов. Например, при значении $quotes равном "{{}}" название некой константы будет представлено
+     *           в "ключе" как "{{некая_константа}}", для значения "1234" будет результат "12некая_константа34" и т.д.
+     *  "значение" - значение конкретной константы
+     * 
+     * Метод полезен там, где требуется заменить в каком-то значение название какой-то конкретной константы на ее значение.
+     * По-умолчанию, к списку указанных в модуле констант добавляется и параметр с "ключом", равным "module_id", и "значением",
+     * равным символьному ID модуля
+     * 
+     * @param string $quotes - символы для выделения названия каждой константы модуля, по-умолчанию принимает значение "[]",
+     * оно же берется, если передано пустое значение
+     * 
+     * @return array
+     */
+    protected function getPreparedContantsForReplacing(string $quotes = '[]')
+    {
+        if (empty($quotes)) $quotes = '[]';
+
+        $startSym = $endSym = $quotes;
+        if ($quoteCenter = strlen($quotes) >> 1) {
+            $startSym = substr($quotes, 0, $quoteCenter);
+            $endSym = substr($quotes, $quoteCenter);
+        }
+        $resultDefinedContants = [];
+        foreach ($this->definedContants as $code => $value) {
+            if (!preg_match('/^\w+$/', $code)) continue;
+
+            $resultDefinedContants[$startSym . strtolower($code) . $endSym] = $value;
+        }
+        return [$startSym . 'module_id' . $endSym => basename(dirname($this->moduleClassPath))] + $resultDefinedContants;
+    }
+
+    /**
+     * Добавление правил обработки адресов
+     *
+     * @return  void
+     */
+    protected function addAddrRules() 
+    {
+        $preparedContants = $this->getPreparedContantsForReplacing();
+        $addrRules = [];
+        foreach ($this->getModuleConstantValue('GROUP_ADDR_RULE') as $rule => $data) {
+            $filter = ['SITE_ID' => self::getDefaultSiteID(), 'CONDITION' => $rule];
+
+            array_walk($data, function(&$value) use($preparedContants) {
+                $value = strtr($value, $preparedContants);
+            });
+            $addrRules[$rule]['data'] = $data;
+            $fields = ['ID' => '', 'PATH' => $data['FILE'], 'RULE' => $data['PARAMS'], 'SORT' => 100];
+            $oldRule = current(CUrlRewriter::GetList($filter, ['SORT' => 'ASC']));
+
+            if (empty($oldRule)) {
+                CUrlRewriter::Add($filter + $fields);
+
+            } else {
+                $addrRules[$rule]['old'] = [
+                    'FILE' => $oldRule['PATH'],
+                    'PARAMS' => $oldRule['RULE'],
+                ];
+                CUrlRewriter::Update($filter, $fields);
+            }
+        }
+        $this->optionClass::setAddrRules($addrRules);
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
@@ -151,6 +241,7 @@ class infoservice_testtask extends CModule
      */
     protected function runInstallMethods()
     {
+        $this->addAddrRules();
     }
 
     /**
@@ -217,12 +308,39 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Удаление правил обработки адресов
+     * 
+     * @return void
+     */
+    protected function removeAddrRules() 
+    {
+        foreach ($this->optionClass::getAddrRules() as $rule => $data) {
+            if (empty($data['old'])) {
+                CUrlRewriter::Delete(['SITE_ID' => self::getDefaultSiteID(), 'CONDITION' => $rule]);
+
+            } else {
+                CUrlRewriter::Update([
+                        'SITE_ID' => self::getDefaultSiteID(),
+                        'CONDITION' => $rule
+                    ], [
+                        'ID' => '',
+                        'PATH' => $data['old']['FILE'],
+                        'RULE' => $data['old']['PARAMS'],
+                        'SORT' => 100
+                    ]
+                );
+            }
+        }
+    }
+
+    /**
      * Выполняется основные операции по удалению модуля
      * 
      * @return void
      */
     protected function runRemoveMethods()
     {
+        $this->removeAddrRules();
     }
 
     /**
