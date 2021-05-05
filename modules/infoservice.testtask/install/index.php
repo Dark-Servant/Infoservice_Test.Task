@@ -123,6 +123,31 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Проверяет наличие языковой константы и ее значение
+     * 
+     * @param $langCode - название языковой константы
+     * @param string $prefixErrorCode - префикс к языковым конcтантам для ошибок без указания ERROR_
+     * в начале, но который должен быть у самой константы
+     * 
+     * @param array $errorParams - дополнительные параметры для ошибок
+     * @return string
+     */
+    protected static function checkLangCode($langCode, string $prefixErrorCode, array $errorParams = [])
+    {
+        if (!isset($langCode))
+            throw new Exception(Loc::getMessage('ERROR_' . $prefixErrorCode . '_LANG', $errorParams));
+        
+        $value = Loc::getMessage($langCode);
+        if (empty($value))
+            throw new Exception(
+                Loc::getMessage('ERROR_' . $prefixErrorCode . '_EMPTY_LANG', $errorParams + [
+                        'LANG_CODE' => $langCode
+                    ])
+            );
+        return $value;
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
