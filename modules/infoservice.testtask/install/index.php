@@ -148,6 +148,42 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Возвращает список констант модуля в виде массива, где
+     *  "ключ" - название константы в нижнем регистре, спереди и в конце названия указаны символы, переданные
+     *           в параметре $quotes, т.е., если в $quotes указан один символ, то он будет с обоих сторон названия
+     *           "ключа", если символов в $quotes больше, то спереди будет первая половина, в конце вторая половина
+     *           этих символов. Например, при значении $quotes равном "{{}}" название некой константы будет представлено
+     *           в "ключе" как "{{некая_константа}}", для значения "1234" будет результат "12некая_константа34" и т.д.
+     *  "значение" - значение конкретной константы
+     *
+     * Метод полезен там, где требуется заменить в каком-то значение название какой-то конкретной константы на ее значение.
+     * По-умолчанию, к списку указанных в модуле констант добавляется и параметр с "ключом", равным "module_id", и "значением",
+     * равным символьному ID модуля
+     *
+     * @param string $quotes - символы для выделения названия каждой константы модуля, по-умолчанию принимает значение "[]",
+     * оно же берется, если передано пустое значение
+     *
+     * @return array
+     */
+    protected function getPreparedContantsForReplacing(string $quotes = '[]')
+    {
+        if (empty($quotes)) $quotes = '[]';
+
+        $startSym = $endSym = $quotes;
+        if ($quoteCenter = strlen($quotes) >> 1) {
+            $startSym = substr($quotes, 0, $quoteCenter);
+            $endSym = substr($quotes, $quoteCenter);
+        }
+        $resultDefinedContants = [];
+        foreach ($this->definedContants as $code => $value) {
+            if (!preg_match('/^\w+$/', $code)) continue;
+
+            $resultDefinedContants[$startSym . strtolower($code) . $endSym] = $value;
+        }
+        return [$startSym . 'module_id' . $endSym => basename(dirname($this->moduleClassPath))] + $resultDefinedContants;
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
