@@ -102,7 +102,15 @@ class infoservice_testtask extends CModule
          *      Infoservice\<Символьное имя модуля>\Helpers\Options::get<название группы опций>
          * например, для IBlockSectionFields
          *      Infoservice\<Символьное имя модуля>\Helpers\Options::getIBlockSectionFields
+         * 
+         * Настройки пользовательких полей для задач
          */
+        'TaskFields' => [
+            'INFS_TEST_FIELD' => [
+                'LANG_CODE' => 'TEST_FIELD',
+                'TYPE' => 'string',
+            ]
+        ]
     ];
 
     /**
@@ -365,6 +373,18 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Создание пользовательского поля для задач
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return mixed
+     */
+    protected function initTaskFieldsOptions(string $constName, array $optionValue)
+    {
+        return $this->addUserField('TASKS_TASK', $constName, $optionValue);
+    }
+
+    /**
      * Создание всех опций
      *
      * @return  void
@@ -506,6 +526,17 @@ class infoservice_testtask extends CModule
         while ($field = $userFields->Fetch()) {
             $entityField->Delete($field['ID']);
         }
+    }
+
+    /**
+     * Удаление пользовательского поля для задач
+     * 
+     * @param string $constName - название константы
+     * @return void
+     */
+    protected function removeTaskFieldsOptions(string $constName) 
+    {
+        $this->removeUserFields('TASKS_TASK', $constName);
     }
 
     /**
