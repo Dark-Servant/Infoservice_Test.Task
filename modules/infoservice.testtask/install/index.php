@@ -198,6 +198,35 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * По значению в параметре $value возвращает либо само значение, если оно имеет численный тип или состоит только
+     * из цифр, либо идентификатор элемента какой-то группы из константы OPTIONS у модуля, название которой указано
+     * в параметре $category
+     *
+     * @param $value - название константы модуля
+     * @param string $category - название категории группы настроек, которая используется в константе OPTIONS
+     *
+     * @return mixed
+     */
+    protected function getCategoryIDByValue($value, string $category)
+    {
+        $methodName = 'get' . $category;
+        if (
+            empty($value)
+            || (!is_integer($value) && !is_string($value))
+            || (
+                (is_integer($value) || preg_match('/^\d+$/', $value))
+                && (($IDValue = intval($value)) < 1)
+            )
+            || (
+                is_string($value)
+                && empty($IDValue = $this->optionClass::$methodName($value))
+            )
+        ) return false;
+
+        return is_array($IDValue) && isset($IDValue['ID']) ? $IDValue['ID'] : $IDValue;
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
