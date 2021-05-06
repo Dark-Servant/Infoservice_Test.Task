@@ -22,6 +22,41 @@ class infoservice_testtask extends CModule
     protected static $defaultSiteID;
 
     /**
+     * Для файлов в папке www, что лежит в папке install модуля. Указываются файлы и папки, на которые надо создать
+     * символьные ссылки в корневой папке сайта, игнорируются указания на все в папке local и подпапках папки bitrix
+     * как activities, admin, components, modules и templates. При создании символьной ссылки в корневой папке
+     * сайта не будет ошибки, если на месте будет уже существовать такие же файл или папка. Уже существующие файлы
+     * или папки будут просто переименованы и запомнены, благодаря чему при удалении модуля снова вернутся на свое место.
+     * Так же в константе WWW_FILES можно указывать файлы и папки, которых нет в www у модуля, это просто приведет к
+     * переименованию существующих в корне сайта с таким же именем файлов или папок, не нужно для этого создавать пустой
+     * файл или папку в папке www у модуля.
+     *
+     * Обычные файлы можно объединять в группы (категории), указывая названия групп как "ключ", а в "значении" указывать
+     * либо пути к файлам в виде массива, либо просто имя файла. Для таких файлов согласно их категориям будут вызваны
+     * свои методы, т.е. тот метод, который первый подойдет согласно этим категориям.
+     * Существуют следующие категории:
+     *     - add. Для такого же файла относительно корня сайта делается копия в файле
+     *         local/.saved/<идентификатор модуля>/<указанный путь к файлу и имя самого файла>
+     *       а затем в заменном файле сначала подключает эта копия, а потом и такой же файл из модуля
+     *     - replace. Делается то же самое, что и при add, только скопированный файл не подключается
+     *       в новом файле. Этого же результата можно добиться и не относя файл к этой категории, а просто
+     *       создать символьную ссылку, но для некоторых файлов могут быть проблемы, так как система может
+     *       потом обращаться только к тому файлу, на который введет символьная ссылка, игнорируя оригинальное
+     *       местонахождение, что приврдит к ошибке, если замена коснулась важных для работы портала файлов,
+     *       например, bitrix/php_interface/dbconn.php
+     *
+     * В ссылках можно использовать добавление подпути в виде имени одной из констант модуля, выделенной кваратными
+     * скобками
+     * [infs_..._module_id] - пример, как надо использовать константы (многоточие это какое-то специальное слово модуля),
+     * По-умолчанию доступно [module_id], которое заменяется на идентификатор модуля
+     */
+    const WWW_FILES = [
+        'add' => 'bitrix/php_interface/dbconn.php',
+        'company/personal.php',
+        'company/[module_id]/index.php'
+    ];
+
+    /**
      * Запоминает и возвращает настоящий путь к текущему классу
      * 
      * @return string
@@ -225,6 +260,120 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Для файла, что находится относительно корня сайта, но не в папке local, у которого
+     * в настройках модуля указана категория add или replace, делает копирование файла
+     * в файл
+     *     local/.saved/<код модуля>/<путь к файлу относительно корня сайта и имя самого файла>
+     * Заменяет оригинальный файл, указывая в нем подключение скопированного, если это категория
+     * add, и добавляет подключение такого же файла из модуля
+     * Возвращает путь к скопированному файлу
+     * 
+     * @param string $filePath - путь к файлу
+     * @param string $fileName - имя файла
+     * @param array $moduleFile - параметры файла, полученные ранее от метода getFileParts
+     * @return null|string
+     */
+    protected function processFileAdditionCategory(string $filePath, string $fileName, array $moduleFile)
+    {
+        $isAdd = in_array('add', $moduleFile['categories']);
+        if (!$isAdd && !in_array('replace', $moduleFile['categories'])) return;
+
+        $fullPath = $_SERVER['DOCUMENT_ROOT'] . $filePath . '/' . $fileName;
+        if (!file_exists($fullPath) || is_dir($fullPath)) return;
+
+        $savingFile = '/local/.saved/' . $this->MODULE_ID . $filePath;
+        $fullOldFilePath = $_SERVER['DOCUMENT_ROOT'] . $savingFile;
+        if (!is_dir($fullOldFilePath)) mkdir($fullOldFilePath, 0755, true);
+
+        $savingFile .= '/' . $fileName;
+        file_put_contents($_SERVER['DOCUMENT_ROOT'] . $savingFile, file_get_contents($fullPath));
+
+        $fullTargerPath = $this->moduleClassPath . '/www/' . $moduleFile['target'];
+        if (file_exists($fullTargerPath) && !is_dir($fullTargerPath)) {
+            file_put_contents($fullPath, '<?' . PHP_EOL);
+            if ($isAdd)
+                file_put_contents($fullPath, sprintf('require_once $_SERVER["DOCUMENT_ROOT"] . "%s";', $savingFile) . PHP_EOL, FILE_APPEND);
+
+            file_put_contents($fullPath, sprintf('require_once "%s";', $fullTargerPath), FILE_APPEND);
+        }
+        return $savingFile;
+    }
+
+    /**
+     * Для файла, что находится относительно корня сайта, но не в папке local, если для
+     * файла указаны какие-то категории, то делает их обработку. В случае, если метод ничего
+     * не вернул, значит, для указанных категорий у файла нельзя было найти подходящий метод
+     * 
+     * @param string $filePath - путь к файлу
+     * @param string $fileName - имя файла
+     * @param array $moduleFile - параметры файла, полученные ранее от метода getFileParts
+     * @return mixed
+     */
+    protected function processFileCategories(string $filePath, string $fileName, array $moduleFile)
+    {
+        if (empty($moduleFile['categories'])) return;
+
+        foreach (['processFileAdditionCategory'] as $methodname) {
+            $result = $this->$methodname($filePath, $fileName, $moduleFile);
+            if ($result) return $result;
+        }
+    }
+
+    /**
+     * Создание символьных ссылок в корне сайта, исключая некоторые папки в папке bitrix и
+     * саму папку local, оригинальные файлы сохраняются, при удалении модуля восстанавливаются
+     * 
+     * @return void
+     */
+    protected function initWWWFiles()
+    {
+        $excludeFiles = [
+            'bitrix/activities', 'bitrix/admin', 'bitrix/components',
+            'bitrix/modules', 'bitrix/templates', 'local'
+        ];
+        $fromPath = $this->moduleClassPath . '/';
+        foreach ($this->getFileParts($this->getModuleConstantValue('WWW_FILES'), $excludeFiles, $this->definedContants) as $moduleFile) {
+            $lastPartNum = $moduleFile['count'] - 1;
+            $result = '';
+            foreach ($moduleFile['parts'] as $pathNum => $subPath) {
+                $newResult = $result . '/' . $subPath;
+                $fullPath = $_SERVER['DOCUMENT_ROOT'] . $newResult;
+                if ($lastPartNum == $pathNum) {
+                    $savingFile = $this->processFileCategories($result, $subPath, $moduleFile);
+                    $optionData = ['result' => $newResult];
+
+                    if ($savingFile) {
+                        $optionData['categories'] = $moduleFile['categories'];
+
+                    } else {
+                        if (file_exists($fullPath)) {
+                            $savingFile = $newResult . '.' . date('YmdHis');
+                            rename($fullPath, $_SERVER['DOCUMENT_ROOT'] . $savingFile);
+                        }
+                        $fullTargerPath = $fromPath . 'www/' . $moduleFile['target'];
+                        if (file_exists($fullTargerPath)) symlink($fullTargerPath, $fullPath);
+                    }
+                    $optionData['old'] = $savingFile;
+                    
+                    /**
+                     * Значения $moduleFile['target'] и параметра result у массива могут совпадать,
+                     * это не значит, что надо убирать result, так как в result учитываются подстановки
+                     * вроде [module_id]
+                     */
+                    $this->optionClass::addWWWFiles($moduleFile['target'], $optionData);
+
+                } elseif (!file_exists($fullPath)) {
+                    mkdir($fullPath);
+
+                } elseif (!is_dir($fullPath) || is_link($fullPath)) {
+                    throw new Exception(Loc::getMessage('ERROR_MAIN_LINK_CREATING', ['LINK' => $moduleFile['target']]));
+                }
+                $result = $newResult;
+            }
+        }
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
@@ -253,6 +402,7 @@ class infoservice_testtask extends CModule
      */
     protected function runInstallMethods()
     {
+        $this->initWWWFiles();
     }
 
     /**
@@ -383,12 +533,82 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Для файлов, которые были обработаны с указанными в параметрах модуля категориями
+     * как add или replace, будет проведена работа. При установке модуля были заменены
+     * файлы относительно корня сайта, исключая папку local, путем копирования их содержимого
+     * в файл
+     *     local/.saved/<код модуля>/<путь к файлу относительно корня сайта и имя самого файла>
+     * а затем созданием нового файла на месте старого с записью в нем о подключении такого
+     * же файла из модуля и, возможно, подключения скопированного файла. При удалении модуля
+     * метод вернет данные скопированных файлов обратно на место.
+     * Метод возвращает true, если файл подходящей категории (add или replace)
+     * 
+     * @param $moduleResult - параметры файла из модуля, полученные от метода removeFiles
+     * @return boolean
+     */
+    protected function checkDeletingForFileAdditionCategory($moduleResult)
+    {
+        if (!count(array_intersect(['add', 'replace'], $moduleResult['categories'])))
+            return false;
+
+        file_put_contents(
+            $_SERVER['DOCUMENT_ROOT'] . $moduleResult['result'],
+            file_get_contents($_SERVER['DOCUMENT_ROOT'] . $moduleResult['old'])
+        );
+        self::deleteEmptyPath('.saved/' . $this->MODULE_ID . $moduleResult['result'], $_SERVER['DOCUMENT_ROOT'] . '/local/');
+        return true;
+    }
+
+    /**
+     * Если для файла указаны какие-то категории в параметрах модуля, то для этого файла
+     * будет обработка согласно этим категориям. Метод возвращает true, если у файла в
+     * параметрах не указаны категории, или не нашлось метода в классе, которой обработал
+     * бы данные из $moduleResult согласно указанным там категориям, или ни один из методов
+     * для работы с категорияма файла не вернул true
+     * 
+     * @param $moduleResult - параметры файла из модуля, полученные от метода removeFiles
+     * @return boolean
+     */
+    protected function processDeletingByFileCategories($moduleResult)
+    {
+        if (empty($moduleResult['categories'])) return true;
+
+        foreach (['checkDeletingForFileAdditionCategory'] as $methodName) {
+            if ($this->$methodName($moduleResult)) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Удаляет созданные модулем файлы в корневом каталоге портала, возвращает старые файлы
+     * 
+     * @return void
+     */
+    protected function removeWWWFiles()
+    {
+        $this->removeFiles($this->optionClass::getWWWFiles() ?? [], 'www', '', $this->definedContants ?? [], function($moduleFile, $moduleResult) {
+            if (empty($moduleResult['old'])) return;
+
+            $oldFileName = $_SERVER['DOCUMENT_ROOT'] . $moduleResult['old'];
+            if (!file_exists($oldFileName) || !$this->processDeletingByFileCategories($moduleResult))
+                return;
+
+            $resultFileName = $_SERVER['DOCUMENT_ROOT'] . $moduleResult['result'];
+            if (file_exists($resultFileName)) return;
+
+            rename($oldFileName, $resultFileName);
+        });
+    }
+
+    /**
      * Выполняется основные операции по удалению модуля
      * 
      * @return void
      */
     protected function runRemoveMethods()
     {
+        $this->removeWWWFiles();
     }
 
     /**
