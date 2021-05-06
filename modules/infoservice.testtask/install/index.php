@@ -102,7 +102,31 @@ class infoservice_testtask extends CModule
          *      Infoservice\<Символьное имя модуля>\Helpers\Options::get<название группы опций>
          * например, для IBlockSectionFields
          *      Infoservice\<Символьное имя модуля>\Helpers\Options::getIBlockSectionFields
-         */
+          * Настройки для добавления пользовательских полей для разделов инфоблоков. На том же самом уровне
+          * вложенности, где указывается тип пользовательского поля, необходимо указывать параметр IBLOCK_ID,
+          * не в части 'SETTINGS', а на том же уровне вложенности. Параметр IBLOCK_ID должен хранить название
+          * константы, в которой указано либо числовое значение, указывающее на идентификатор реального инфоблока,
+          * либо символьное имя, т.е. сама константа ранее была использована для создания инфоблока в части
+          * настроек IBlocks
+          */
+        'IBlockSectionFields' => [
+            /**
+             * Пример создания пользовательского поля. Для инфоблока "Оргструктура" -> "Подразделения"
+             * создается поле строкового типа с названием "Короткое название подразделения"
+             * 
+             * После установки модуля может оказаться, что там нет поля, тогда надо проверить значение
+             * константы INFS_DIVISION_IBLOCK_ID в файле include.php, константа должна содержать идентификатор
+             * указанного выше инфоблока
+             */ 
+            'INFS_DIVISION_SECTION_SHORT_NAME' => [
+                'LANG_CODE' => 'DIVISION_SECTION_SHORT_NAME_TITLE',
+                'IBLOCK_ID' => 'INFS_DIVISION_IBLOCK_ID',
+                'TYPE' => 'string',
+                'SHOW_FILTER' => 'I',
+                'SHOW_IN_LIST' => 'Y',
+                'EDIT_IN_LIST' => 'Y'
+            ],
+        ],
     ];
 
     /**
@@ -365,6 +389,27 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Создание пользовательского поля для разделов инфоблоков
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return mixed
+     */
+    protected function initIBlockSectionFieldsOptions(string $constName, array $optionValue) 
+    {
+        if (!Loader::includeModule('iblock')) return;
+
+        if (empty($optionValue['IBLOCK_ID']) || !defined($optionValue['IBLOCK_ID']))
+            throw new Exception(Loc::getMessage('ERROR_IBCLOCK_SECTION_NO_ID', ['NAME' => $constName]));
+
+        $iblockID = $this->getCategoryIDByValue(constant($optionValue['IBLOCK_ID']), 'IBlocks');
+        if (empty($iblockID))
+            throw new Exception(Loc::getMessage('ERROR_IBCLOCK_SECTION_UNKNOWN_ID', ['NAME' => $constName]));
+
+        return $this->addUserField('IBLOCK_' . $iblockID . '_SECTION', $constName, $optionValue) + ['IBLOCK_ID' => $iblockID];
+    }
+
+    /**
      * Создание всех опций
      *
      * @return  void
@@ -506,6 +551,20 @@ class infoservice_testtask extends CModule
         while ($field = $userFields->Fetch()) {
             $entityField->Delete($field['ID']);
         }
+    }
+
+    /**
+     * Удаление пользовательского поля для разделов инфоблоков
+     * 
+     * @param string $constName - название константы
+     * @return mixed
+     */
+    protected function removeIBlockSectionFieldsOptions(string $constName) 
+    {
+        if (!Loader::includeModule('iblock')) return;
+
+        $iblockID = $this->optionClass::getIBlockSectionFields(constant($constName))['IBLOCK_ID'];
+        $this->removeUserFields('IBLOCK_' . $iblockID . '_SECTION', $constName);
     }
 
     /**
