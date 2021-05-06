@@ -4,6 +4,7 @@ use Bitrix\Main\{
     Loader,
     Config\Option
 };
+use Bitrix\Highloadblock\{HighloadBlockTable, HighloadBlockLangTable};
 use Infoservice\TestTask\EventHandles\Employment;
 
 class infoservice_testtask extends CModule
@@ -58,6 +59,23 @@ class infoservice_testtask extends CModule
      */
     const OPTIONS = [
         /**
+         * Настройки для создания HighloadBlock. В значении массив с "ключами"
+         *     NAME - кодовое имя HighloadBlock
+         *     TABLE_NAME - название таблицы
+         * После установки данные каждого highloadblock сохраняются в опциях модуля в группе HighloadBlock как массив, где
+         * "ключ" это значение константы, название которой указанно тут как "ключ", а "значение" это ID highloadblock.
+         * Получить из опций модуля к данным установленного конкретного highloadblock можно с помощью
+         *      Infoservice\<Символьное имя модуля>\Helpers\Options::getHighloadBlock(<константа, чье имя использовалось тут в настройках>)
+         */
+        'HighloadBlock' => [
+            
+            // Тестовый HighloadBlock
+            'INFS_HL_TEST_MESSAGES' => [
+                'LANG_CODE' => 'HL_TEST_MESSAGES_TITLE'
+            ],
+        ],
+
+        /**
          * настройки для создания пользовательских полей для чего-угодно. Значения хранят настройки пользовательского
          * поля. 
          * ENTITY_ID и FIELD_NAME не указывать. Значение FIELD_NAME должно быть объявлено в include.php как
@@ -102,7 +120,47 @@ class infoservice_testtask extends CModule
          *      Infoservice\<Символьное имя модуля>\Helpers\Options::get<название группы опций>
          * например, для IBlockSectionFields
          *      Infoservice\<Символьное имя модуля>\Helpers\Options::getIBlockSectionFields
+         * 
+         * Настройки пользовательских полей для HighloadBlock. Обязательно указание параметра HBLOCK_ID,
+         * в значении которого указать константу модуля, под которой хранится идентификатор существующего
+         * HighloadBlock или значение, которое используеся в части HighloadBlock для создания модулем своих
+         * highloadblock. Остальные настройки такие же, как указано выше для пользовательских полей
+         * 
+         * ВНИМАНИЕ. Если в настройках полей HighloadBlock не указывать параметры SHOW_IN_LIST и EDIT_IN_LIST,
+         * равные Y, то при добавлении данных highloadblock через административную часть нельзя будет увидеть
+         * добавленные к highloadblock поля
          */
+        'HighloadFields' => [
+            /**
+             * Тестовые поля для тестового HighloadBlock
+             */
+            'INFS_STR_FIELD' => [
+                'HBLOCK_ID' => 'INFS_HL_TEST_MESSAGES',
+                'LANG_CODE' => 'STR_FIELD_TITLE',
+                'TYPE' => 'string',
+                'SHOW_IN_LIST' => 'Y',
+                'EDIT_IN_LIST' => 'Y'
+            ],
+
+            'INFS_INT_FIELD' => [
+                'HBLOCK_ID' => 'INFS_HL_TEST_MESSAGES',
+                'LANG_CODE' => 'INT_FIELD_TITLE',
+                'TYPE' => 'double',
+                'SHOW_IN_LIST' => 'Y',
+                'EDIT_IN_LIST' => 'Y'
+            ],
+
+           /**
+             * Тестовое поле для уже существующего HighloadBlock
+             */
+            'INFS_ALLREADY_EXISTS_HL_FIELD' => [
+                'HBLOCK_ID' => 'INFS_HL_ALLREADY_EXISTS_UNIT_ID',
+                'LANG_CODE' => 'ALLREADY_EXISTS_HL_FIELD_TITLE',
+                'TYPE' => 'double',
+                'SHOW_IN_LIST' => 'Y',
+                'EDIT_IN_LIST' => 'Y'
+            ]
+        ]
     ];
 
     /**
@@ -365,6 +423,73 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Создает нужный highloadblock, если его нет, иначе вызывает исключение.
+     * Возвращает ID созданного highloadblock.
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return void|integer
+     * @throws
+     */
+    protected function initHighloadBlockOptions(string $constName, array $optionValue)
+    {
+        if (!Loader::includeModule('highloadblock')) return;
+
+        $codeName = strtolower(constant($constName));
+        $name = preg_replace_callback(
+            '/(?:^|_)(\w)/',
+            function($part) {
+                return strtoupper($part[1]);
+            },
+            $codeName
+        );
+        $result = HighloadBlockTable::add(
+            [
+                'NAME' => $name,
+                'TABLE_NAME' => preg_replace('/[^a-z\d]+/i', '', $codeName)
+            ]
+        );
+        if (!$result->isSuccess(true))
+            throw new Exception(
+                Loc::getMessage('ERROR_HIGHLOAD_CREATING', ['NAME' => $optionName])
+                . PHP_EOL . implode(PHP_EOL, $result->getErrorMessages())
+            );
+        $hlId = $result->GetId();
+        if (
+            !empty($optionValue['LANG_CODE'])
+            && !empty($title = Loc::getMessage($optionValue['LANG_CODE']))
+        ) HighloadBlockLangTable::add(['ID' => $hlId, 'LID' => LANGUAGE_ID, 'NAME' => $title]);
+
+        return $hlId;
+    }
+
+    /**
+     * Создает пользовательское поле для highloadblock
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return mixed
+     */
+    protected function initHighloadFieldsOptions(string $constName, array $optionValue) 
+    {
+        if (!defined($optionValue['HBLOCK_ID'])) return;
+
+        $hlID = $this->getCategoryIDByValue(constant($optionValue['HBLOCK_ID']), 'HighloadBlock');
+        if (empty($hlID))
+            throw new Exception(Loc::getMessage('ERROR_BAD_HBLOCK_ID', ['#NAME#' => $constName]));
+
+        $entityId = 'HLBLOCK_' . $hlID;
+        return $this->addUserField(
+                            $entityId, $constName,
+                            array_filter(
+                                $optionValue, function($key) {
+                                    return $key != 'HBLOCK_ID';
+                                }, ARRAY_FILTER_USE_KEY
+                            )
+                        );
+    }
+
+    /**
      * Создание всех опций
      *
      * @return  void
@@ -506,6 +631,44 @@ class infoservice_testtask extends CModule
         while ($field = $userFields->Fetch()) {
             $entityField->Delete($field['ID']);
         }
+    }
+
+    /**
+     * Удаление highloadblock, созданного модулем при установке
+     * 
+     * @param string $constName - название константы
+     * @return void
+     */
+    protected function removeHighloadBlockOptions(string $constName) 
+    {
+        if (!Loader::includeModule('highloadblock')) return;
+
+        $codeName = strtolower(constant($constName));
+        $name = preg_replace_callback(
+            '/(?:^|_)(\w)/',
+            function($part) {
+                return strtoupper($part[1]);
+            },
+            $codeName
+        );
+        $hlUnt = HighloadBlockTable::GetList(['filter' => ['NAME' => $name]])->Fetch();
+        if (!$hlUnt) return;
+
+        HighloadBlockTable::delete($hlUnt['ID']);
+    }
+
+    /**
+     * Удаление пользовательского поля для highloadblock. Метод нужен, только, если
+     * добавляются пользовательские поля для уже существующих highloadblock, так как
+     * поля для создаваемых модулем highloadblock автоматически удалятся вместе с самим
+     * highloadblock
+     * 
+     * @param string $constName - название константы
+     * @return void
+     */
+    protected function removeHighloadFieldsOptions(string $constName)
+    {
+        (new CUserTypeEntity())->Delete($this->optionClass::getHighloadFields(constant($constName))['ID']);
     }
 
     /**

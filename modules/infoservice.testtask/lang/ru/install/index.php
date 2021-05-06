@@ -13,3 +13,11 @@ $MESS['ERROR_BAD_USER_FIELD_IBLOCK'] = 'У пользовательского п
                                      . 'название константы, под которой хранится символьный код или идентификатор '
                                      . 'инфоблока';
 $MESS['ERROR_USER_FIELD_CREATING'] = 'Не удалось добавить пользовательское поле NAME';
+$MESS['ERROR_HIGHLOAD_CREATING'] = 'Не удалось добавить highload NAME';
+$MESS['ERROR_BAD_HBLOCK_ID'] = 'Указана константа с неправильным значением, оно не является ни идентификатором, '
+                             . 'ни именем настройки для создаваемых модулем highload-ов';
+
+$MESS['HL_TEST_MESSAGES_TITLE'] = 'Тестовый highload';
+$MESS['STR_FIELD_TITLE'] = 'Строковое поле';
+$MESS['INT_FIELD_TITLE'] = 'Числовое поле';
+$MESS['ALLREADY_EXISTS_HL_FIELD_TITLE'] = 'Поле для существующего highload';
