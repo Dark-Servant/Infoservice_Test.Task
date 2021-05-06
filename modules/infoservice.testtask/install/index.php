@@ -20,8 +20,11 @@ class infoservice_testtask extends CModule
     protected $definedContants;
 
     protected static $defaultSiteID;
-    const SAVE_OPTIONS_WHEN_DELETED = true;
 
+    const ADMIN_GROUP_ID = 1;
+    const ALL_USER_GROUP_ID = 2;
+    const SAVE_OPTIONS_WHEN_DELETED = true;
+    
     /**
      * Опции, которые необходимо добавить в проект, сгруппированы по названиям, которые будут использоваться
      * в имени метода для их добавления. Опции описываются как ассоциативный массив, где "ключ" - центральная
@@ -57,6 +60,82 @@ class infoservice_testtask extends CModule
      * использовать в следующем модуле. 
      */
     const OPTIONS = [
+        /**
+         * Настройки для создания типов инфоблока. В "значении" указываются параметры для создания типа инфоблока.
+         * Обязательно нужен параметр LANG_CODE с именем языковой константы для названия
+         */
+        'IBlockTypes' => [
+            'INFS_TEST_TASK_IBLOCK_TYPE' => [
+                'LANG_CODE' => 'TEST_TASK_IBLOCK_TYPE'
+            ]
+        ],
+
+        /**
+         * Настройки для создания инфоблоков. В "значении" указываются параметры для создания инфоблоков. Обязательно
+         * нужны параметры LANG_CODE с именем языковой константы для названия и IBLOCK_TYPE_ID с именем константы, в
+         * которой хранится код типа инфоблока.
+         * В параметре PERMISSIONS указываются права доступа к инфоблоку, где "ключ" - идентификатор пользовательской
+         * группы, а "значение" - код права доступа. По-умолчанию, для администраторов  установлен "полный доступ",
+         * а для всех пользователей - "чтение".
+         * Права доступа:
+         *     E - добавление элементов инфоблока в публичной части;
+         *     S - просмотр элементов и разделов в административной части;
+         *     T - добавление элементов инфоблока в административной части; 
+         *     R - чтение; 
+         *     U - редактирование через документооборот; 
+         *     W - запись; 
+         *     X - полный доступ (запись + назначение прав доступа на данный инфоблок).
+         * Права доступа можно указывать и для групп, созданных модулем, просто указав в "ключе" строковый
+         * идентификатор константы, используемый в UserGroup
+         */
+        'IBlocks' => [
+            'INFS_TEST_TASK_IBLOCK' => [
+                'LANG_CODE' => 'TEST_TASK_IBLOCK',
+                'IBLOCK_TYPE_ID' => 'INFS_TEST_TASK_IBLOCK_TYPE',
+                'BIZPROC' => 'Y',
+            ]
+        ],
+
+        /**
+         * Настройки для создания свойств инфоблоков. В "ключе" указывается название константы модуля, у которой в
+         * "значении" указан символьным код свойства. В "значении" же указываются параметры для создания свойств инфоблоков.
+         * Обязательно нужны параметры LANG_CODE с именем языковой константы для названия и IBLOCK_ID с именем константы,
+         * которая использовалась в IBlocks как "ключ", под которым хранятся настройки инфоблока, или которая объявлена
+         * в include.php с идентификатором уже существующего инфоблока.
+         * Если тип свойства список (PROPERTY_TYPE = L), то в параметрах свойств можно указать параметр LIST_VALUES, в
+         * значении которого указан массив, где каждый элемент содержит минимум один параметр с ключом LANG_CODE для
+         * языковой константы, под которой хранится значение параметра, но название константы указывается не полностью,
+         * а лишь ее последняя часть, что должна идти после префикса, который указан как название языковой константы в
+         * LANG_CODE у самого свойства, т.е. название языковой константы в файлах с переводом для какого-то элемента
+         * списка должно соответствовать шаблону
+         *      <константа из LANG_CODE для свойства инфоблока><дополнительная часть языковой константы>
+         * 
+         * Если тип свойства связан с другим инфоблоком, то в параметрах используется параметр LINK_IBLOCK_ID, для значения
+         * которого действуют те же правила, что и для параметра IBLOCK_ID
+         * 
+         * Как и в других группах, параметры каждого элемента группы, точнее свойства инфоблока указываются под "ключом",
+         * который является константой из файла модуля include.php. Но тут возможна ошибка, так как могут быть использованы
+         * разные инфоблоки, а группа настроек для свойств инфоблока у одного модуля одна, то может случиться ситуация, когда
+         * были указаны настройки для свойств разных инфоблоков под разными названиями констант, но одинаковыми "значениями",
+         * т.е. символьными именами свойств, из-за чего вся информация о всех добавленных свойствах инфоблока с этими символьными
+         * именами, кроме последнего добавленного свойства, будет не сохранена, а, значит, модуль после удаления оставит мусор в
+         * системе. Для решения такой проблемы в значении константы надо использовать префикс, например, для свойства STRING_PROPERTY
+         * из инфоблока с символьным именем some_iblock можно указать some_iblock.STRING_PROPERTY, при установке будет использовано
+         * именно STRING_PROPERTY
+         */
+        'IBlockProperties' => [
+            'INFS_TT_IB_STR_PR' => [
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TT_IB_STR_PR',
+                'PROPERTY_TYPE' => 'S'
+            ],
+
+            'INFS_TT_IB_INT_PR' => [
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TT_IB_INT_PR',
+                'PROPERTY_TYPE' => 'N'
+            ]
+        ],
     ];
 
     /**
@@ -158,6 +237,277 @@ class infoservice_testtask extends CModule
         include  $this->moduleClassPath . '/version.php';
         $this->MODULE_VERSION = $arModuleVersion['VERSION'];
         $this->MODULE_VERSION_DATE = $arModuleVersion['VERSION_DATE'];
+    }
+
+    /**
+     * Проверяет наличие языковой константы и ее значение
+     * 
+     * @param $langCode - название языковой константы
+     * @param string $prefixErrorCode - префикс к языковым конcтантам для ошибок без указания ERROR_
+     * в начале, но который должен быть у самой константы
+     * 
+     * @param array $errorParams - дополнительные параметры для ошибок
+     * @return string
+     */
+    protected static function checkLangCode($langCode, string $prefixErrorCode, array $errorParams = [])
+    {
+        if (!isset($langCode))
+            throw new Exception(Loc::getMessage('ERROR_' . $prefixErrorCode . '_LANG', $errorParams));
+        
+        $value = Loc::getMessage($langCode);
+        if (empty($value))
+            throw new Exception(
+                Loc::getMessage('ERROR_' . $prefixErrorCode . '_EMPTY_LANG', $errorParams + [
+                        'LANG_CODE' => $langCode
+                    ])
+            );
+        return $value;
+    }
+
+    /**
+     * У переданного значения параметра $name убирает префикс, т.е. текст в значении, идущий до последней
+     * точки. Возвращает либо то же самое значение, что было передано, если префикса не окажется, либо то,
+     * что стоит после префикса
+     *
+     * @param string $name - название параметра
+     *
+     * @return string
+     */
+    protected static function getNameWithoutPrefix(string $name)
+    {
+        return preg_match('/\w+\.(\S+)/', $name, $nameParts) ? $nameParts[1] : $name;
+    }
+
+    /**
+     * Создание типа инфоблока
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return void
+     * @throws
+     */
+    protected function initIBlockTypesOptions(string $constName, array $optionValue)
+    {
+        if (!Loader::includeModule('iblock')) return;
+
+        $iblockTypeID = constant($constName);
+        if (CIBlockType::GetList([], ['ID' => $iblockTypeID])->Fetch())
+            return;
+
+        $title = self::checkLangCode($optionValue['LANG_CODE'], 'IBLOCK_TYPE', ['TYPE' => $constName]);
+        $data = ['ID' => $iblockTypeID, 'LANG' => ['RU' => ['NAME' => $title]]]
+              + array_filter($optionValue, function($key) {
+                    return !in_array($key, ['LANG_CODE']);
+                }, ARRAY_FILTER_USE_KEY)
+              + ['SECTIONS' => 'Y'];
+
+        $list = new CIBlockType();
+        if (!$list->Add($data))
+            throw new Exception(
+                Loc::getMessage('ERROR_IBLOCK_TYPE_CREATING', ['TYPE' => $constName])
+                . PHP_EOL . $list->LAST_ERROR
+            );
+    }
+
+    /**
+     * По значению в параметре $value возвращает либо само значение, если оно имеет численный тип или состоит только
+     * из цифр, либо идентификатор элемента какой-то группы из константы OPTIONS у модуля, название которой указано
+     * в параметре $category
+     *
+     * @param $value - название константы модуля
+     * @param string $category - название категории группы настроек, которая используется в константе OPTIONS
+     *
+     * @return mixed
+     */
+    protected function getCategoryIDByValue($value, string $category)
+    {
+        $methodName = 'get' . $category;
+        if (
+            empty($value)
+            || (!is_integer($value) && !is_string($value))
+            || (
+                (is_integer($value) || preg_match('/^\d+$/', $value))
+                && (($IDValue = intval($value)) < 1)
+            )
+            || (
+                is_string($value)
+                && empty($IDValue = $this->optionClass::$methodName($value))
+            )
+        ) return false;
+
+        return is_array($IDValue) && isset($IDValue['ID']) ? $IDValue['ID'] : $IDValue;
+    }
+
+    /**
+     * На основе прав доступа к конкретным группам пользователей, указанных в входном параметре $permissions,
+     * создает и возвращает готовый массив с правами доступа и идентификаторами конкретных пользовательских
+     * групп.
+     * В параметре $permissions права досупа указываются так
+     *      "ключ" - либо идентификатор существующей в системе группы, либо строковые значение с именем
+     *      константы, значение которой хранит либо идентификатор, либо массив идентификаторов пользовательских
+     *      групп, либо
+     *      "значение" - код права доступа
+     *
+     * @param array $permissions - права доступа
+     * @return array
+     */
+    protected function prepareGroupPermissions(array $permissions)
+    {
+        $resultPermissions = [];
+        foreach ($permissions as $groupId => $accessValue) {
+            if (is_integer($groupId)) {
+                $resultPermissions[$groupId] = $accessValue;
+
+            } elseif (
+                is_string($groupId) && !empty($groupId)
+                && defined($groupId) && !empty($groupId = constant($groupId))
+             ) {
+                if (!is_array($groupId)) $groupId = [$this->getCategoryIDByValue($groupId, 'UserGroup') ?: $groupId];
+
+                foreach ($groupId as $gID) {
+                    $resultPermissions[$gID] = $accessValue;
+                }
+            }
+        }
+        return $resultPermissions;
+    }
+
+    /**
+     * Создание инфоблока
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return integer
+     * @throws
+     */
+    protected function initIBlocksOptions(string $constName, array $optionValue)
+    {
+        // Инфоблок может создаваться в другом типе инфоблока
+        if (!Loader::includeModule('iblock')) return;
+
+        $title = self::checkLangCode($optionValue['LANG_CODE'], 'IBLOCK', ['#IBLOCK#' => $constName]);
+        $data = [
+                    'ACTIVE' => 'Y',
+                    'NAME' => $title,
+                    'CODE' => constant($constName),
+                    'IBLOCK_TYPE_ID' => constant($optionValue['IBLOCK_TYPE_ID']),
+                    /**
+                     * VERSION определяет способ хранения значений свойств элементов инфоблока
+                     *     1 - в общей таблице
+                     *     2 - в отдельной
+                     * Но выбрано строго 2, так ка при работе с множественными значениями свойств
+                     * инфоблока могут быть проблемы из-за того, что при запросе элементов через
+                     * GetList на каждое значение свойства будет дан столько же раз тот же элемент
+                     */
+                    'VERSION' => 2
+                ]
+              + array_filter($optionValue, function($key) {
+                    return !in_array($key, ['LANG_CODE', 'PERMISSIONS']);
+                }, ARRAY_FILTER_USE_KEY)
+              + [
+                    'DETAIL_PAGE_URL' => '',
+                    'LIST_PAGE_URL' => '',
+                    'WORKFLOW' => 'N',
+                    'BIZPROC' => 'N',
+                    'SITE_ID' => self::getDefaultSiteID()
+                ];
+
+        $iblock = new CIBlock;
+        $iblockId = $iblock->Add($data);
+        if (!$iblockId)
+            throw new Exception(
+                Loc::getMessage('ERROR_IBLOCK_CREATING', ['#IBLOCK#' => $constName])
+                . PHP_EOL . $iblock->LAST_ERROR
+            );
+
+        CIBlock::SetPermission(
+            $iblockId,
+            self::prepareGroupPermissions(
+                array_replace([self::ADMIN_GROUP_ID => 'X', self::ALL_USER_GROUP_ID => 'R'], $optionValue['PERMISSIONS'] ?: [])
+            )
+        );
+
+        return $iblockId;
+    }
+
+    /**
+     * Создание значений для свойства инфоблока типа "Список"
+     * 
+     * @param int $propertyId - ID свойства инфоблока
+     * @param array $propertyValues - список значений
+     * @param string $langCode - префикс к языковым константам для названий значений
+     * @return array
+     */
+    protected function addIBlockPropertyListValues(int $propertyId, array $propertyValues, string $langCode)
+    {
+        $values = [];
+        $ids = [];
+        $list = new CIBlockPropertyEnum;
+        foreach ($propertyValues as $unit) {
+            $value = Loc::getMessage(($langCode ? $langCode . '_' : '') . $unit['LANG_CODE']);
+            $lowerCaseValue = strtolower($value);
+            if (empty($value) || in_array($lowerCaseValue, $values)) continue;
+
+            $listUnitId = intval($list->Add(['PROPERTY_ID' => $propertyId, 'VALUE' => $value]));
+            $ids['VALUES'][] = $listUnitId;
+            $ids[$unit['LANG_CODE'] . '_ID'] = $listUnitId;
+        }
+        return $ids;
+    }
+
+    /**
+     * Создание свойств инфоблока
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return integer
+     * @throws
+     */
+    protected function initIBlockPropertiesOptions(string $constName, array $optionValue)
+    {
+        if (!Loader::includeModule('iblock')) return;
+
+        $title = self::checkLangCode($optionValue['LANG_CODE'], 'IBLOCK_PROPERTY', ['#PROPERTY#' => $constName]);
+        $iblockID = $this->getCategoryIDByValue(constant($optionValue['IBLOCK_ID']), 'IBlocks');
+        if (!$iblockID) throw new Exception(Loc::getMessage('ERROR_BAD_PROPERTY_IBLOCK', ['#PROPERTY#' => $constName]));
+
+        $data = [
+                    'ACTIVE' => 'Y',
+                    'IBLOCK_ID' => $iblockID,
+                    'NAME' => $title,
+                    'CODE' => self::getNameWithoutPrefix(constant($constName))
+                ]
+              + array_filter($optionValue, function($key) {
+                    return !in_array($key, ['LANG_CODE', 'LIST_VALUES']);
+                }, ARRAY_FILTER_USE_KEY)
+              + [
+                    'IS_REQUIRED' => 'N',
+                    'MULTIPLE' => 'N',
+                    'MULTIPLE_CNT' => 5,
+                    'LIST_TYPE' => 'L'
+                ];
+
+        if (array_key_exists('LINK_IBLOCK_ID', $data))
+            $data['LINK_IBLOCK_ID'] = $this->getCategoryIDByValue(constant($data['LINK_IBLOCK_ID']), 'IBlocks');
+
+        $property = new CIBlockProperty;
+        $propertyId = $property->Add($data);
+        if (!$propertyId)
+            throw new Exception(
+                Loc::getMessage('ERROR_IBLOCK_PROPERTY_CREATING', ['#PROPERTY#' => $constName])
+                . PHP_EOL . $property->LAST_ERROR
+            );
+
+        $result = ['ID' => $propertyId];
+        if (
+            ($optionValue['PROPERTY_TYPE'] == 'L') && !$optionValue['USER_TYPE']
+            && !empty($optionValue['LIST_VALUES'])
+        ) $result += $this->addIBlockPropertyListValues(
+                                    $result['ID'],
+                                    $optionValue['LIST_VALUES'],
+                                    $optionValue['LANG_CODE'] ?: ''
+                                );
+        return $result;
     }
 
     /**
@@ -284,6 +634,62 @@ class infoservice_testtask extends CModule
                 $this->moduleClassPath . '/error.php'
             );
         }
+    }
+
+    /**
+     * Удаление типа инфоблока
+     * 
+     * @param $constName - название константы
+     * @return void
+     */
+    protected function removeIBlockTypesOptions(string $constName)
+    {
+        if (!Loader::includeModule('iblock')) return;
+
+        $iblockTypeID = constant($constName);
+        $iblocks = CIBlock::GetList([], ['CHECK_PERMISSIONS' => 'N']);
+        while ($iblock = $iblocks->Fetch()) {
+            if ($iblock['IBLOCK_TYPE_ID'] != $iblockTypeID) continue;
+
+            CIBlock::Delete($iblock['ID']);
+        }
+
+        CIBlockType::Delete($iblockTypeID);
+    }
+
+    /**
+     * Удаление инфоблока. Метод нужен, не смотря на то, что при удалении типа инфоблока
+     * удаляются и все его инфоблоки, но модуль можно заставить создавать инфоблоки в
+     * других типах инфоблоков
+     * 
+     * @param $constName - название константы
+     * @return void
+     */
+    protected function removeIBlocksOptions(string $constName)
+    {
+        if (!Loader::includeModule('iblock')) return;
+
+        $iblockCode = constant($constName);
+        if (empty($iblockId = $this->optionClass::getIBlocks($iblockCode)) || !is_integer($iblockId))
+            return;
+
+        CIBlock::Delete($iblockId);
+    }
+    
+    /**
+     * Удаление свойств инфоблока
+     * 
+     * @param string $constName - название константы
+     * @return void
+     */
+    protected function removeIBlockPropertiesOptions(string $constName)
+    {
+        if (
+            !Loader::includeModule('iblock')
+            || empty($iblockProperty = $this->optionClass::getIBlockProperties(constant($constName)))
+        ) return;
+
+        CIBlockProperty::Delete($iblockProperty['ID']);
     }
 
     /**
