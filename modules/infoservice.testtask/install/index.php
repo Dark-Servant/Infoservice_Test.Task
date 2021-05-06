@@ -57,6 +57,62 @@ class infoservice_testtask extends CModule
      * использовать в следующем модуле. 
      */
     const OPTIONS = [
+        /**
+         * Настройки для создания типов календарей. Обязателен параметр LANG_CODE.
+         * Для указания описания к типу, если оно нужно, надо использовать DESCRIPTION_LANG_CODE.
+         * В параметре ACCESS можно указать доступы пользователей. В "ключе" указывается
+         * код для пользовательской группы (G<ID>) или пользователя (U<ID>) или название
+         * константы модуля, под значением которой находится либо идентификатор пользователькой группы,
+         * либо она использовалась в настройках пользовательской группы, создаваемой
+         * этим модулем. В "значении" указывается символьный ключ того, какой доступ
+         * предоставить:
+         *    D - доступ закрыт
+         *    R - просмотр
+         *    W - редактирование событий и календарей
+         *    X - полный доступ
+         */
+
+         /**
+          * Это тестовый календарь, для его проверки надо зайти на страницу <ДОМЕН>/local/modules/infoservice.testtask/install/public
+          */
+        'CalendarTypes' => [
+            'INFS_CALENDAR_TYPE_TESTING' => [
+                'LANG_CODE' => 'CALENDAR_TYPE_TESTING',
+                'ACCESS' => ['G1' => 'X', 'G3' => 'R']
+            ],
+        ],
+
+        /**
+         * Настройки для создания секций типов календаря. Необходимые параметры
+         *    LANG_CODE - назвние языковой константы с название секции
+         *    TYPE - строковое название константы, которое указано в файле include.php
+         *    у модуля. В константе должно быть указано символьное имя типа календаря,
+         *    под которым в CalendarTypes прописаны настройки типа календаря, или в
+         *    случае отсутствия этого описания там, то символьное имя уже существующего
+         *    в системе типа календаря
+         *
+         * Дополнительно можно указать параметры:
+         *    DESCRIPTION_LANG_CODE - название языковой коснтанты с описанием секции типа календаря
+         *    ACCESS - доступ к секции конкретных пользователей или пользовательских групп. Указывать это параметр
+         *      можно аналогично настройкам этого параметра в части для типов календаря CalendarTypes. Доступны
+         *      следующие коды: D, O, P, R, W, X
+         *      
+         */
+
+         /**
+          * Это тестовые типы секций календаря, для их проверки надо зайти на страницу <ДОМЕН>/local/modules/infoservice.testtask/install/public
+          */
+        'CalendarTypeSections' => [
+            'INFS_CALENDAR_SECTION_FIRST_TESTING' => [
+                'LANG_CODE' => 'CALENDAR_SECTION_FIRST_TESTING',
+                'TYPE' => 'INFS_CALENDAR_TYPE_TESTING'
+            ],
+
+            'INFS_CALENDAR_SECTION_SECOND_TESTING' => [
+                'LANG_CODE' => 'CALENDAR_SECTION_SECOND_TESTING',
+                'TYPE' => 'INFS_CALENDAR_TYPE_TESTING'
+            ],
+        ],
     ];
 
     /**
@@ -158,6 +214,156 @@ class infoservice_testtask extends CModule
         include  $this->moduleClassPath . '/version.php';
         $this->MODULE_VERSION = $arModuleVersion['VERSION'];
         $this->MODULE_VERSION_DATE = $arModuleVersion['VERSION_DATE'];
+    }
+
+    /**
+     * Проверяет наличие языковой константы и ее значение
+     * 
+     * @param $langCode - название языковой константы
+     * @param string $prefixErrorCode - префикс к языковым конcтантам для ошибок без указания ERROR_
+     * в начале, но который должен быть у самой константы
+     * 
+     * @param array $errorParams - дополнительные параметры для ошибок
+     * @return string
+     */
+    protected static function checkLangCode($langCode, string $prefixErrorCode, array $errorParams = [])
+    {
+        if (!isset($langCode))
+            throw new Exception(Loc::getMessage('ERROR_' . $prefixErrorCode . '_LANG', $errorParams));
+        
+        $value = Loc::getMessage($langCode);
+        if (empty($value))
+            throw new Exception(
+                Loc::getMessage('ERROR_' . $prefixErrorCode . '_EMPTY_LANG', $errorParams + [
+                        'LANG_CODE' => $langCode
+                    ])
+            );
+        return $value;
+    }
+
+    /**
+     * Подготавливает и возвращает массив доступов к каким-нибудь данным, используя символьный
+     * код группы данных, к которой относятся массив с доступами.
+     * Массив с доступами представляется из себя массив, где под "ключами" могут быть явно указаны коды с идентификаторами
+     * конкретных пользовательских групп (G<ID>), пользователей (U<ID>) или имя какой-то константы модуля, в значении которой
+     * могут храниться либо идентификатор конкретной пользовательской группы, либо она используется в настройках модуля для
+     * создания пользовательской группы (UserGroup)
+     * 
+     * Возвращает правильное описание доступов для использования в дальнейшем при создании
+     * 
+     * @param string $code - символьный код группы, к которой относятся доступы
+     * @param array $templates - массив с доступами
+     * @return array
+     */
+    protected function getCalendarAccessByTemplate(string $code, array $templates)
+    {
+        static $accessType = null;
+        static $accessCodes = null;
+        if ($accessType != $code) {
+            $caledarAccess = Bitrix\Main\TaskTable::GetList(['filter' => ['BINDING' => $accessType = $code]]);
+            $accessCodes = [];
+            while ($access = $caledarAccess->Fetch()) {
+                $accessCodes[$access['LETTER']] = $access['ID'];
+            }
+        }
+
+        $accessResult = [];
+        foreach ($templates as $who => $accessCode) {
+            if (empty($accessCodes[$accessCode]) || empty($who)) continue;
+
+            if (is_string($who) && defined($who)) {
+                if (empty($who = constant($who))) continue;
+
+                $group = preg_match('/^\d+$/', strval($who)) ? $who : $this->optionClass::getUserGroup($who);
+                if (empty($group)) continue;
+
+                if (!is_array($group)) $group = [$group];
+
+                foreach ($group as $groupId) {
+                    $accessResult['G' . $groupId] = $accessCodes[$accessCode];
+                }
+
+            } else {
+                $accessResult[$who] = $accessCodes[$accessCode];
+            }
+        }
+        return $accessResult;
+    }
+
+    /**
+     * Создание типа календаря
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return mixed
+     */
+    protected function initCalendarTypesOptions(string $constName, array $optionValue)
+    {
+        if (!Loader::includeModule('calendar')) return;
+ 
+        $title = self::checkLangCode($optionValue['LANG_CODE'], 'CALENDAR_TYPE_UNIT', ['CALENDAR_TYPE' => $constName]);
+        $data = [
+            'NEW' => true,
+            'arFields' => [
+                'XML_ID' => constant($constName), 
+                'NAME' => $title, 
+                'DESCRIPTION' => $optionValue['DESCRIPTION_LANG_CODE']
+                               ? Loc::getMessage($optionValue['DESCRIPTION_LANG_CODE'])
+                               : '',
+                'ACTIVE' => 'Y',
+                'ACCESS' => $this->getCalendarAccessByTemplate('calendar_type', $optionValue['ACCESS'] ?? [])
+            ]
+        ];
+
+        $calendar = \CCalendarType::Edit($data);
+        if ($calendar === false)
+            throw new \Exception(
+                            Loc::getMessage(
+                                'ERROR_CALENDAR_TYPE_UNIT_CREATING',
+                                ['CALENDAR_TYPE' => $constName]
+                            )
+                        );
+        return $calendar;
+    }
+
+    /**
+     * Создание секций для типов календарей
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return mixed
+     */
+    protected function initCalendarTypeSectionsOptions(string $constName, array $optionValue)
+    {
+        if (!Loader::includeModule('calendar')) return;
+
+        if (empty($optionValue['TYPE']))
+            throw new Exception(Loc::getMessage('ERROR_CALENDAR_SECTION_EMPTY_TYPE_NAME', ['CALENDAR_SECTION' => $constName]));
+
+        $title = self::checkLangCode($optionValue['LANG_CODE'], 'CALENDAR_SECTION_UNIT', ['CALENDAR_SECTION' => $constName]);
+        $data = [
+                'XML_ID' => constant($constName),
+                'CAL_TYPE' => defined($optionValue['TYPE']) ? constant($optionValue['TYPE']) : $optionValue['TYPE'],
+                'NAME' => $title, 
+                'DESCRIPTION' => $optionValue['DESCRIPTION_LANG_CODE']
+                               ? Loc::getMessage($optionValue['DESCRIPTION_LANG_CODE'])
+                               : '',
+                'ACTIVE' => 'Y',
+                'ACCESS' => $this->getCalendarAccessByTemplate('calendar_section', $optionValue['ACCESS'] ?? []),
+            ] +
+            array_filter(
+                $optionValue,
+                function($key) {
+                    return !in_array($key, ['LANG_CODE', 'DESCRIPTION_LANG_CODE', 'TYPE', 'ID']);
+                }, ARRAY_FILTER_USE_KEY
+            ) + [
+                'OWNER_ID' => 0
+            ];
+
+        $calendarSectionId = \CCalendarSect::Edit(['arFields' => $data]);
+        if (!$calendarSectionId)
+            throw new Exception(Loc::getMessage('ERROR_CALENDAR_SECTION_UNIT_CREATING', ['CALENDAR_SECTION' => $constName]));
+        return $calendarSectionId;
     }
 
     /**
@@ -284,6 +490,38 @@ class infoservice_testtask extends CModule
                 $this->moduleClassPath . '/error.php'
             );
         }
+    }
+
+    /**
+     * Удаление типов календарей
+     * 
+     * @param string $constName - название константы
+     * @return integer
+     */
+    protected function removeCalendarTypesOptions(string $constName)
+    {
+        if (!Loader::includeModule('calendar')) return;
+
+        $calendar = $this->optionClass::getCalendarTypes(constant($constName));
+        if (!$calendar) return;
+
+        \CCalendarType::Delete($calendar);
+    }
+    
+    /**
+     * Удаление секций для типов календарей
+     * 
+     * @param string $constName - название константы
+     * @return integer
+     */
+    protected function removeCalendarTypeSectionsOptions(string $constName)
+    {
+        if (!Loader::includeModule('calendar')) return;
+
+        $calendarSectionId = $this->optionClass::getCalendarTypeSections(constant($constName));
+        if (!$calendarSectionId) return;
+
+        \CCalendarSect::Delete($calendarSectionId);
     }
 
     /**
