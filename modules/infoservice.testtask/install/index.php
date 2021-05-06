@@ -4,7 +4,10 @@ use Bitrix\Main\{
     Loader,
     Config\Option
 };
-use Infoservice\TestTask\EventHandles\Employment;
+use Infoservice\TestTask\{
+    EventHandles\Employment,
+    Helpers\Modules\Lists\ListFieldList
+};
 
 class infoservice_testtask extends CModule
 {
@@ -64,11 +67,7 @@ class infoservice_testtask extends CModule
          * Настройки для создания типов инфоблока. В "значении" указываются параметры для создания типа инфоблока.
          * Обязательно нужен параметр LANG_CODE с именем языковой константы для названия
          */
-        'IBlockTypes' => [
-            'INFS_TEST_TASK_IBLOCK_TYPE' => [
-                'LANG_CODE' => 'TEST_TASK_IBLOCK_TYPE'
-            ]
-        ],
+        'IBlockTypes' => [],
 
         /**
          * Настройки для создания инфоблоков. В "значении" указываются параметры для создания инфоблоков. Обязательно
@@ -91,7 +90,7 @@ class infoservice_testtask extends CModule
         'IBlocks' => [
             'INFS_TEST_TASK_IBLOCK' => [
                 'LANG_CODE' => 'TEST_TASK_IBLOCK',
-                'IBLOCK_TYPE_ID' => 'INFS_TEST_TASK_IBLOCK_TYPE',
+                'IBLOCK_TYPE_ID' => 'INFS_LIST_IBLOCK_TYPE',
                 'BIZPROC' => 'Y',
             ]
         ],
@@ -136,6 +135,62 @@ class infoservice_testtask extends CModule
                 'PROPERTY_TYPE' => 'N'
             ]
         ],
+        
+        /**
+         * Настройки для создания полей для списков, которые в свою очередь являются инфоблоками, настройки каждого элемента этой
+         * группы указываются под "ключом", который является именем константы, объявленной в файле include.php у модуля. Значение
+         * этой константы должно указывать либо на параметры инфоблока, которые у того всегда, например, "название"  (NAME),
+         * "детальное описание" (DETAIL_TEXT), либо на сивольные имена свойств инфоблока. Может вознукнуть ситуация, что потребуется
+         * создать поле для одних и тех же параметров из разных инфоблоков, тогда в настройках модуля затрется информация о более ранее
+         * созданном поле, чье значение в константе совпало со значением другой константы, используемой для другого поля. Чтобы
+         * этого избежать, надо использовать префикс в значении константы, т.е. какой-то текст, отделенный точкой от настоящего имени
+         * параметра инфоблока.
+         * В "значениях" группы с настройками для полей списков указывается ассоциативный массив, где важным параметром является
+         *      IBLOCK_ID - название константы модуля, в значении которой указан либо идентификатор существующего инфоблока, либо
+         *      символьное имя, используемое в группе IBlocks для создания модулем своего инфоблока
+         * А дополнительно можно указать
+         *      SORT - значение сортировки поля, т.е. положение поля списка относительно других полей списка
+         *      LANG_CODE - название языковой константы, в которой указано название поля. Если этой настройки нет, то за имя поля будет
+         *      взято значение по-умолчанию, которое установлено в модуле lists или имя свойства инфоблока, если это найстройки
+         *      для свойства инфоблока
+         */
+        'IBlockListFields' => [
+            'INFS_TT_IB_LIST_NAME' => [
+                'SORT' => 10,
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TEST_TASK_LIST_NAME',
+            ],
+
+            'INFS_TT_IB_LIST_DETAIL_TEXT' => [
+                'SORT' => 20,
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TEST_TASK_LIST_DETAIL_TEXT',
+            ],
+
+            'INFS_TT_IB_LIST_DATE_CREATE' => [
+                'SORT' => 30,
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TEST_TASK_LIST_DATE_CREATE',
+            ],
+
+            'INFS_TT_IB_LIST_CREATED_BY' => [
+                'SORT' => 40,
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TEST_TASK_LIST_CREATED_BY',
+            ],
+
+            'INFS_TT_IB_STR_PR' => [
+                'SORT' => 50,
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TEST_TASK_LIST_STR_PR',
+            ],
+
+            'INFS_TT_IB_INT_PR' => [
+                'SORT' => 60,
+                'IBLOCK_ID' => 'INFS_TEST_TASK_IBLOCK',
+                'LANG_CODE' => 'TEST_TASK_LIST_INT_PR',
+            ]
+        ]
     ];
 
     /**
@@ -511,6 +566,37 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Создания поля списка, в роли которого выступает инфоблок
+     *
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     *
+     * @return array
+     * @throws
+     */
+    protected function initIBlockListFieldsOptions(string $constName, array $optionValue)
+    {
+        static $listFields = [];
+
+        $fieldCode = self::getNameWithoutPrefix(trim(strval(constant($constName))));
+        if (empty($fieldCode)) throw new Exception(Loc::getMessage('ERROR_LIST_FIELD_EMPTY_CODE', ['#CODE#' => $constName]));
+
+        $iblockID = $this->getCategoryIDByValue(constant($optionValue['IBLOCK_ID']), 'IBlocks');
+        if (!$iblockID) throw new Exception(Loc::getMessage('ERROR_BAD_LIST_FIELD_IBLOCK', ['#CODE#' => $constName]));
+
+        $caption = isset($optionValue['LANG_CODE']) ? Loc::getMessage($optionValue['LANG_CODE']) : null;
+        $sortValue = is_integer($optionValue['SORT']) && ($optionValue['SORT'] > 0) ? $optionValue['SORT'] : 10;
+
+        if (empty($listFields[$iblockID])) $listFields[$iblockID] = new ListFieldList($iblockID);
+        $result = $listFields[$iblockID]->setField($fieldCode, $caption, $sortValue);
+        $listFields[$iblockID]->saveList();
+
+        if (!$result) throw new Exception(Loc::getMessage('ERROR_BAD_LIST_IB_PROPERTY', ['#CODE#' => $constName]));
+
+        return $result;
+    }
+
+    /**
      * Создание всех опций
      *
      * @return  void
@@ -690,6 +776,29 @@ class infoservice_testtask extends CModule
         ) return;
 
         CIBlockProperty::Delete($iblockProperty['ID']);
+    }
+
+    /**
+     * Удаление поля списка, роль которого выполняет инфоблок
+     *
+     * @param string $constName - название константы
+     * @return void
+     */
+    protected function removeIBlockListFieldsOptions(string $constName)
+    {
+        static $listFields = [];
+
+        $constantValue = constant($constName);
+        $data = $this->optionClass::getIBlockListFields($constantValue);
+        if (empty($listFields[$data['IBLOCK_ID']])) $listFields[$data['IBLOCK_ID']] = new ListFieldList($data['IBLOCK_ID']);
+
+        $fieldCode = self::getNameWithoutPrefix($constantValue);
+
+        // 
+        if (!empty($data['NAME'])) $listFields[$data['IBLOCK_ID']]->setField($fieldCode, $data['NAME'], $data['SORT'] ?? 10);
+        if (!$data['WAS_FIELD']) $listFields[$data['IBLOCK_ID']]->deactiveField($data['FIELD_ID']);
+
+        $listFields[$data['IBLOCK_ID']]->saveList();
     }
 
     /**
