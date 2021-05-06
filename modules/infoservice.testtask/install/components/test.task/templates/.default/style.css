@@ -1,0 +1,7 @@
+.test-hidden {
+    display:none !important;
+}
+
+.test-no-reaction {
+    pointer-events: none !important;
+}

@@ -34,7 +34,10 @@ class infoservice_testtask extends CModule
      * [infs_..._module_id] - пример, как надо использовать константы (многоточие это какое-то специальное слово модуля),
      * Так же по-умолчанию доступно [module_id], которое заменяется на идентификатор модуля
      */
-    const FILE_LINKS = [];
+    const FILE_LINKS = [
+        'components/[module_id]/test.task',
+        'public',
+    ];
 
     /**
      * Запоминает и возвращает настоящий путь к текущему классу
