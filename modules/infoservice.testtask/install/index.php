@@ -227,6 +227,40 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * На основе прав доступа к конкретным группам пользователей, указанных в входном параметре $permissions,
+     * создает и возвращает готовый массив с правами доступа и идентификаторами конкретных пользовательских
+     * групп.
+     * В параметре $permissions права досупа указываются так
+     *      "ключ" - либо идентификатор существующей в системе группы, либо строковые значение с именем
+     *      константы, значение которой хранит либо идентификатор, либо массив идентификаторов пользовательских
+     *      групп, либо
+     *      "значение" - код права доступа
+     *
+     * @param array $permissions - права доступа
+     * @return array
+     */
+    protected function prepareGroupPermissions(array $permissions)
+    {
+        $resultPermissions = [];
+        foreach ($permissions as $groupId => $accessValue) {
+            if (is_integer($groupId)) {
+                $resultPermissions[$groupId] = $accessValue;
+
+            } elseif (
+                is_string($groupId) && !empty($groupId)
+                && defined($groupId) && !empty($groupId = constant($groupId))
+             ) {
+                if (!is_array($groupId)) $groupId = [$this->getCategoryIDByValue($groupId, 'UserGroup') ?: $groupId];
+
+                foreach ($groupId as $gID) {
+                    $resultPermissions[$gID] = $accessValue;
+                }
+            }
+        }
+        return $resultPermissions;
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
