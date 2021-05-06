@@ -2,7 +2,8 @@
 use Bitrix\Main\{
     Localization\Loc,
     Loader,
-    Config\Option
+    Config\Option,
+    Type\DateTime
 };
 use Infoservice\TestTask\EventHandles\Employment;
 
@@ -20,6 +21,8 @@ class infoservice_testtask extends CModule
     protected $definedContants;
 
     protected static $defaultSiteID;
+    
+    const USER_ID = 1;
     const SAVE_OPTIONS_WHEN_DELETED = true;
 
     /**
@@ -57,6 +60,40 @@ class infoservice_testtask extends CModule
      * использовать в следующем модуле. 
      */
     const OPTIONS = [
+        /**
+         * Настройки для создания агентов, в "значении" указываются параметры, которые передаются
+         * методу CAgent::AddAgent, с "ключами" как названия параметров
+         *     period - периодичность запуска, после чего следующий запус будет вычисляться как
+         *              next_exec = next_exec + interval;
+         *     interval - интервал (в секундах), с какой периодичностью запускать агента;
+         *     datecheck - дата первой проверки "не пора ли запустить агент" в формате текущего языка;
+         *     active - активность агента;
+         *     next_exec - дата первого запуска агента в формате текущего языка, по-умолчанию текущее время, т.е.
+         *                 после установки агента он будет тут же запущен и, если метод агета вовзращает что-то
+         *                 неправильное, то тут же будет удален;
+         *     sort - индекс сортировки;
+         *     user_id - id пользователя, с правами которого запускается агент.
+         * Параметр name указывать не надо, он берется из значения константы, название которой указано в Agents
+         * как "ключ". В значении константы указывается последняя часть namespace, название класса и метод.
+         * Параметры datecheck и next_exec поддерживают запись как у функции strtotime, т.е. есть возможность
+         * установить дату на завтра, через неделю от текущего числа и т.д.
+         * Обязательно нужно, чтобы каждый метод агента возвращал строковое значение, в котором прописан
+         * код для следующего запуска, обычно это тот же метод, иначе после запуска агент будет удален
+         * из системы
+         */
+        'Agents' => [
+            'INFS_TESTTASK_AGENT_NAME_WITHOUT_PARAM' => [
+                'period' => 'Y',
+                'next_exec' => '+ 5 minutes', // сработает через 5 минут после установки модуля
+                'interval' => 300
+            ],
+
+            'INFS_TESTTASK_AGENT_NAME_WITH_PARAM' => [
+                'period' => 'Y',
+                'next_exec' => '+ 2 minutes', // сработает через 2 минуты после установки модуля
+                'interval' => 300
+            ]
+        ],
     ];
 
     /**
@@ -158,6 +195,66 @@ class infoservice_testtask extends CModule
         include  $this->moduleClassPath . '/version.php';
         $this->MODULE_VERSION = $arModuleVersion['VERSION'];
         $this->MODULE_VERSION_DATE = $arModuleVersion['VERSION_DATE'];
+    }
+
+    /**
+     * Создание агентов в системе
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return integer
+     * @throws
+     */
+    protected function initAgentsOptions(string $constName, array $optionValue)
+    {
+        foreach ($optionValue as $paramName => $paramData) {
+            $$paramName = $paramData;
+        }
+        $methodName = $this->nameSpaceValue . '\\' . constant($constName);
+        if (!preg_match('/^([^:]+)::(\w+)(?:\(([\W\w]*)\))?;?$/', $methodName, $methodParts))
+            throw new Exception(
+                Loc::getMessage('ERROR_BAD_AGENT_CONSTANT_VALUE', [
+                                    '#NAME#' => $constName,
+                                    '#CONSTANT_VALUE#' => $methodName
+                                ])
+                );
+
+        list(, $className, $methodName, $params) = $methodParts;
+        if (!method_exists($className, $methodName))
+            throw new Exception(
+                Loc::getMessage('ERROR_BAD_AGENT_CLASS', [
+                                    '#NAME#' => $constName,
+                                    '#CLASS_NAME#' => $className,
+                                    '#METHOD_NAME#' => $methodName
+                                ])
+            );
+
+        if ($datecheck)
+            $datecheck = DateTime::createFromTimestamp(strtotime($datecheck));
+
+        if ($next_exec)
+            $next_exec = DateTime::createFromTimestamp(strtotime($next_exec));
+
+        $agentID = \CAgent::AddAgent(
+                        $className . '::' . $methodName . '(' . ($params ?? '') . ');',
+                        $this->MODULE_ID,
+                        $period ?? 'N',
+                        $interval ?? 60,
+                        $datecheck ?? '',
+                        $active ?? 'Y',
+                        $next_exec ?? '',
+                        $sort ?? 100,
+                        $user_id ?? self::USER_ID,
+                        $existError ?? false
+                    );
+        if ($agentID) return $agentID;
+
+        throw new Exception(
+            Loc::getMessage('ERROR_BAD_AGENT_PARAMS', [
+                                '#NAME#' => $constName,
+                                '#ERROR_VALUE#' => $APPLICATION->GetException()
+                            ])
+        );
     }
 
     /**
@@ -284,6 +381,20 @@ class infoservice_testtask extends CModule
                 $this->moduleClassPath . '/error.php'
             );
         }
+    }
+
+    /**
+     * Удаление агентов
+     * 
+     * @param $constName - название константы
+     * @return void
+     */
+    protected function removeAgentsOptions(string $constName)
+    {
+        $agentId = intval($this->optionClass::getAgents(constant($constName)));
+        if (!$agentId) return;
+
+        \CAgent::Delete($agentId);
     }
 
     /**
