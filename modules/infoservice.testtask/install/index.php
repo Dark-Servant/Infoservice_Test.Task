@@ -184,6 +184,20 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * У переданного значения параметра $name убирает префикс, т.е. текст в значении, идущий до последней
+     * точки. Возвращает либо то же самое значение, что было передано, если префикса не окажется, либо то,
+     * что стоит после префикса
+     *
+     * @param string $name - название параметра
+     *
+     * @return string
+     */
+    protected static function getNameWithoutPrefix(string $name)
+    {
+        return preg_match('/\w+\.(\S+)/', $name, $nameParts) ? $nameParts[1] : $name;
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
