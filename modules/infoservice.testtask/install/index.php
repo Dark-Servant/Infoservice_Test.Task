@@ -22,6 +22,21 @@ class infoservice_testtask extends CModule
     protected static $defaultSiteID;
 
     /**
+     * Пути к файлам и папкам, что лежат в папке install модуля,  на которые необходимо создать символьные ссылки
+     * относительно папки local. Игнорируются файлы из папки www. Символная ссылка будет созданна на последнюю часть
+     * указанного пути, по остальным частям будут созданны папки, если их нет. При удалении модуля сивмольная ссылка
+     * удалится, а затем и все папки, в которые она входит, если в них больше ничего нет, и чьи названия указаны тут.
+     * Если при установке выяснится, что символьная ссылка на последнюю часть пути уже существует, или на ее месте
+     * находится папа, или одна из непоследних частей пути не является папкой, то произойдет ошибка
+     * В ссылках можно использовать добавление подпути в виде имени одной из констант модуля, выделенной кваратными
+     * скобками, это будет работать при установке файла в систему, может потребоваться, если нужно выделить файлы
+     * модуля
+     * [infs_..._module_id] - пример, как надо использовать константы (многоточие это какое-то специальное слово модуля),
+     * Так же по-умолчанию доступно [module_id], которое заменяется на идентификатор модуля
+     */
+    const FILE_LINKS = [];
+
+    /**
      * Запоминает и возвращает настоящий путь к текущему классу
      * 
      * @return string
@@ -225,6 +240,42 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Создание символьных ссылок в папке local
+     * 
+     * @return void
+     */
+    protected function initFileLinks()
+    {
+        $localLinks = [];
+        $fromPath = $this->moduleClassPath . '/';
+        foreach ($this->getFileParts($this->getModuleConstantValue('FILE_LINKS'), ['www'], $this->definedContants) as $moduleFile) {
+            $targetFromPath = $fromPath . $moduleFile['target'];
+            if (!file_exists($targetFromPath)) continue;
+
+            $lastPartNum = $moduleFile['count'] - 1;
+            $subResult = '';
+            foreach ($moduleFile['parts'] as $pathNum => $subPath) {
+                $subResult .= '/' . $subPath;
+                $result = $_SERVER['DOCUMENT_ROOT'] . '/local' . $subResult;
+                if (!file_exists($result)) {
+                    if ($lastPartNum > $pathNum) {
+                        mkdir($result);
+
+                    } else {
+                        symlink($targetFromPath, $result);
+                        $localLinks[$moduleFile['target']] = ['result' => $subResult];
+                    }
+
+                } elseif (!is_dir($result) || is_link($result) || ($lastPartNum == $pathNum)) {
+                    $this->optionClass::setLocalLinks($localLinks);
+                    throw new Exception(Loc::getMessage('ERROR_LINK_CREATING', ['LINK' => $moduleFile['target']]));
+                }
+            }
+        }
+        $this->optionClass::setLocalLinks($localLinks);
+    }
+
+    /**
      * Подключает модуль и сохраняет созданные им константы
      * 
      * @return void
@@ -253,6 +304,7 @@ class infoservice_testtask extends CModule
      */
     protected function runInstallMethods()
     {
+        $this->initFileLinks();
     }
 
     /**
@@ -383,12 +435,23 @@ class infoservice_testtask extends CModule
     }
 
     /**
+     * Удаление всех созданных модулем символьных ссылок
+     * 
+     * @return void
+     */
+    protected function removeFileLinks()
+    {
+        $this->removeFiles($this->optionClass::getLocalLinks() ?? [], '', 'local', $this->definedContants ?? []);
+    }
+
+    /**
      * Выполняется основные операции по удалению модуля
      * 
      * @return void
      */
     protected function runRemoveMethods()
     {
+        $this->removeFileLinks();
     }
 
     /**
