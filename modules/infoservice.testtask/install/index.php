@@ -57,6 +57,17 @@ class infoservice_testtask extends CModule
      * использовать в следующем модуле. 
      */
     const OPTIONS = [
+        /**
+         * Данные для тематик групп соц. сетей. Настройки для каждой тематики указываются в отдельном элементе,
+         * описанном как массив. В этом массиве обязательным является параметр LANG_CODE, хранящий название языковой
+         * константы, в которой хранится название тематики. Сами настройки тематики указываются тут под конкретным
+         * "ключом" строкового типа. Значение "ключа" это название константы, которая объявлена у модуля в файле include.php
+         */
+        'SocNetSubjects' => [
+            'INFS_SOCNET_TEST_SUBJECT' => [
+                'LANG_CODE' => 'SOCNET_TEST_SUBJECT'
+            ]
+        ],
     ];
 
     /**
@@ -158,6 +169,53 @@ class infoservice_testtask extends CModule
         include  $this->moduleClassPath . '/version.php';
         $this->MODULE_VERSION = $arModuleVersion['VERSION'];
         $this->MODULE_VERSION_DATE = $arModuleVersion['VERSION_DATE'];
+    }
+
+    /**
+     * Проверяет наличие языковой константы и ее значение
+     * 
+     * @param $langCode - название языковой константы
+     * @param string $prefixErrorCode - префикс к языковым конcтантам для ошибок без указания ERROR_
+     * в начале, но который должен быть у самой константы
+     * 
+     * @param array $errorParams - дополнительные параметры для ошибок
+     * @return string
+     */
+    protected static function checkLangCode($langCode, string $prefixErrorCode, array $errorParams = [])
+    {
+        if (!isset($langCode))
+            throw new Exception(Loc::getMessage('ERROR_' . $prefixErrorCode . '_LANG', $errorParams));
+        
+        $value = Loc::getMessage($langCode);
+        if (empty($value))
+            throw new Exception(
+                Loc::getMessage('ERROR_' . $prefixErrorCode . '_EMPTY_LANG', $errorParams + [
+                        'LANG_CODE' => $langCode
+                    ])
+            );
+        return $value;
+    }
+
+    /**
+     * Создание тематики для групп соц. сетей
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return integer
+     */
+    protected function initSocNetSubjectsOptions(string $constName, array $optionValue)
+    {
+        if (!Loader::includeModule('socialnetwork')) return;
+
+        $title = self::checkLangCode($optionValue['LANG_CODE'], 'SOCNET', ['SOCNET' => $constName]);
+        $data = [
+                'SITE_ID' => self::getDefaultSiteID(),
+                'NAME' => $title
+            ];
+        if (CSocNetGroupSubject::GetList(['ID' => 'ASC'], $data)->Fetch())
+            throw new Exception(Loc::getMessage('ERROR_EMPTY_SOCNET_SUBJECT_EXISTS', ['NAME' => $constName]));
+
+        return CSocNetGroupSubject::Add($data);
     }
 
     /**
@@ -284,6 +342,23 @@ class infoservice_testtask extends CModule
                 $this->moduleClassPath . '/error.php'
             );
         }
+    }
+
+    /**
+     * Удаление тематики групп соц. сетей
+     * 
+     * @param $constName - название константы
+     * @return void
+     */
+    protected function removeSocNetSubjectsOptions(string $constName)
+    {
+        if (
+            !Loader::includeModule('socialnetwork')
+            || !($socNetSubjectId = constant($constName))
+            || !($socNetSubjectId = $this->optionClass::getSocNetSubjects($socNetSubjectId))
+        ) return;
+
+        CSocNetGroupSubject::Delete($socNetSubjectId);
     }
 
     /**
