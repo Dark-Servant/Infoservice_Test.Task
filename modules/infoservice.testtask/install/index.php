@@ -57,6 +57,65 @@ class infoservice_testtask extends CModule
      * использовать в следующем модуле. 
      */
     const OPTIONS = [
+
+        /**
+         * Настройки для создания пользовательских групп, "ключ" хранит название константы, которая должна
+         * быть объявлена в файле include.php, а "значение" хранит параметры группы, важным из которых является
+         * параметр LANG_CODE с наванием языковой константы, в которой хранится название группы. Для указания
+         * описания можно использоать DESCRIPTION_LANG_CODE, в котором так же указывается языковая константа
+         * со значением для описания.
+         * 
+         * Так же для каждой группы доступны следующие параметры
+         * 
+         *      USERIDS - название константы модуля, в которой указаны либо одно числовое значение, указывающее на
+         *                уже существующего пользователя в системе, либо массив со числовыми значениями, указывающие на
+         *                уже существующих пользователей. Так же можно указывать в значении константы строковые значения
+         *                с символьными кодомами, под которым находятся настройки пользователей, добавляемых модулем
+         *                (часть Users), или массив со такими же строковыми значениями или числовыми, ссылающимися на
+         *                добавленных модулем пользователей или существующих в системе. Все указанные пользователи в
+         *                значении константы будут добавлены как участники пользовательской группы
+         * 
+         *      RIGHTS - права доступа к конкретным модулям. Права по каждому модулю указываются в виде массива, где
+         *          "ключ" - это код модуля;
+         *          "значение" - либо буква, обозначающая конкретный доступ, либо массив, где "ключ" это код сайта,
+         *                       а "значение" буква, обозначающая конкретный доступ, так же в массиве с числовым
+         *                       "ключом" можно указывать и просто конкретный доступ, это будет восприниматься как 
+         *                       такой же доступ, если "значение" параметра RIGHTS использовалось бы не как массив,
+         *                       а просто как буква 
+         * 
+         *      Чтобы узнать какие доступы к какому модули можно указать, стоит воспользоваться методом getAllUserGroupRightCodes,
+         *      созданном здесь в классе модуля, он выдаст все доступы по всем модулям с учетом всяких нюансов. Буквы с доступами
+         *      для каждого модуля будут объявлены в части с "ключом" reference_id
+         * 
+         * Дополнительно можно указать в настройках пользовательскх групп параметр SORT с числовым значением сортировки
+         * группы среди других групп на портале
+         */
+        'UserGroup' => [
+
+            'INFS_FIRST_USER_GROUP' => [
+                'LANG_CODE' => 'FIRST_USER_GROUP_TITLE',
+                'DESCRIPTION_LANG_CODE' => 'FIRST_USER_GROUP_DESCRIPTION',
+                'RIGHTS' => [
+                    'main' => 'P', // модуль "Главный модуль", права "Изменение своего профиля"
+                    'ml' => 'R', // модуль "Машинное обучение", права "просмотр всех данных модуля"
+                    'pull' => 'W', // модуль "Push and Pull", права "запись"
+                    'clouds' => 'F', // модуль "Облачные хранилища", права "Выбор файлов"
+                    'catalog' => 'R', // модуль "Торговый каталог", права "Чтение"
+
+                     /**
+                      * модуль "Социальная сеть", права "полный доступ" для конкретно основного сайта и
+                      * права "просмотр административной части" для всех сайтов портала
+                      */ 
+                    'socialnetwork' => ['R', 's1' => 'W']
+                ]
+            ],
+
+            'INFS_SECOND_USER_GROUP' => [
+                'LANG_CODE' => 'SECOND_USER_GROUP_TITLE',
+                'DESCRIPTION_LANG_CODE' => 'SECOND_USER_GROUP_DESCRIPTION',
+                'USERIDS' => 'INFS_SECOND_USER_USER_IDS'
+            ],
+        ],
     ];
 
     /**
@@ -158,6 +217,203 @@ class infoservice_testtask extends CModule
         include  $this->moduleClassPath . '/version.php';
         $this->MODULE_VERSION = $arModuleVersion['VERSION'];
         $this->MODULE_VERSION_DATE = $arModuleVersion['VERSION_DATE'];
+    }
+
+    /**
+     * Проверяет наличие языковой константы и ее значение
+     * 
+     * @param $langCode - название языковой константы
+     * @param string $prefixErrorCode - префикс к языковым конcтантам для ошибок без указания ERROR_
+     * в начале, но который должен быть у самой константы
+     * 
+     * @param array $errorParams - дополнительные параметры для ошибок
+     * @return string
+     */
+    protected static function checkLangCode($langCode, string $prefixErrorCode, array $errorParams = [])
+    {
+        if (!isset($langCode))
+            throw new Exception(Loc::getMessage('ERROR_' . $prefixErrorCode . '_LANG', $errorParams));
+        
+        $value = Loc::getMessage($langCode);
+        if (empty($value))
+            throw new Exception(
+                Loc::getMessage('ERROR_' . $prefixErrorCode . '_EMPTY_LANG', $errorParams + [
+                        'LANG_CODE' => $langCode
+                    ])
+            );
+        return $value;
+    }
+
+    /**
+     * По значению в параметре $value возвращает либо само значение, если оно имеет численный тип или состоит только
+     * из цифр, либо идентификатор элемента какой-то группы из константы OPTIONS у модуля, название которой указано
+     * в параметре $category
+     *
+     * @param $value - название константы модуля
+     * @param string $category - название категории группы настроек, которая используется в константе OPTIONS
+     *
+     * @return mixed
+     */
+    protected function getCategoryIDByValue($value, string $category)
+    {
+        $methodName = 'get' . $category;
+        if (
+            empty($value)
+            || (!is_integer($value) && !is_string($value))
+            || (
+                (is_integer($value) || preg_match('/^\d+$/', $value))
+                && (($IDValue = intval($value)) < 1)
+            )
+            || (
+                is_string($value)
+                && empty($IDValue = $this->optionClass::$methodName($value))
+            )
+        ) return false;
+
+        return is_array($IDValue) && isset($IDValue['ID']) ? $IDValue['ID'] : $IDValue;
+    }
+
+    /**
+     * Возвращает описание доступов ко всем возможным модулям, в части reference_id будут отмечены
+     * буквы с доступами, ключи которых могут начинаться не с 0, если модуль имеет специальные настройки,
+     * относится к tasks. Так же в возвращаемом значении будут указаны названия модулей, их тип, т.е
+     * насколько заумно их доступы реализованы (самое сложное наблюдается для tasks, у self модуль имеет
+     * свои настройки доступов, остальные имеют настройки доступов по-умолчанию), в части reference будут
+     * указаны описания доступов модулей
+     * 
+     * Более подробную информацию по реалиации доступов, их изменении лучше искать в файле 
+     *      bitrix/modules/main/admin/group_edit.php
+     * 
+     * @return array
+     */
+    protected static function getAllUserGroupRightCodes()
+    {
+        global $APPLICATION;
+    
+        static $modules = [];
+        if (!empty($modules)) return $modules;
+    
+        Loader::includeModule('tasks');
+    
+        $moduleRights = CTask::GetTasksInModules(true, false, 'module');
+        foreach ($moduleRights as &$rightData) {
+            $referenceID = [];
+            foreach ($rightData['reference_id'] as $num => $id) {
+                if (!preg_match('/^\[(\w+)\]/iu', $rightData['reference'][$num], $referenceParts))
+                    continue;
+    
+                $referenceID[$id] = $referenceParts[1];
+            }
+            $rightData['reference_id'] = $referenceID;
+        }
+        $defaultRights = $APPLICATION->GetDefaultRightList();
+        $dbModules = CModule::GetList();
+        while ($mdl = $dbModules->Fetch()) {
+            $module = CModule::CreateModuleObject($mdl['ID']);
+            if (!empty($moduleRights[$module->MODULE_ID])) {
+                $modules[$module->MODULE_ID] = $moduleRights[$module->MODULE_ID] + ['type' => 'tasks'];
+    
+            } elseif (method_exists($module, 'GetModuleRightList')) {
+                $modules[$module->MODULE_ID] = call_user_func([$module, 'GetModuleRightList']) + ['type' => 'self'];
+    
+            } else {
+                $modules[$module->MODULE_ID] = $defaultRights;
+            }
+            $modules[$module->MODULE_ID]['name'] = $module->MODULE_NAME;
+        }
+        return $modules;
+    }
+
+    /**
+     * Устанавливает для пользовательской группы доступы к другим модулям
+     *
+     * @param int $groupID - идентификатор пользовательской группы
+     * @param array $rights - массив с правами доступов по конкретным модулям. Имеет вид
+     *      "ключ" - символьный код модуля
+     *      "значение" - буква с доступом, либо массив, где значения с буквой доступа под
+     *                   числовыми ключами массива означают то же, как если вместо массива
+     *                   была просто буква, а значения с буквой доступа под строковыми
+     *                   ключами указаваются как доступы для конкретного сайта портала, чей
+     *                   код и указывается в ключе массива
+     *
+     * @return void
+     */
+    protected static function setUserGroupRights(int $groupID, array $rights)
+    {
+        global $APPLICATION;
+        $tasksIds = [];
+        $moduleRights = self::getAllUserGroupRightCodes();
+        foreach ($rights as $moduleCode => $rightValue) {
+            if (!is_array($rightValue)) {
+                if (!in_array($rightValue, $moduleRights[$moduleCode]['reference_id']))
+                    continue;
+    
+                $APPLICATION->SetGroupRight($moduleCode, $groupID, $rightValue);
+    
+                if ($moduleRights[$moduleCode]['type'] !== 'tasks') continue;
+                $tasksIds[$moduleCode] = array_search($rightValue, $moduleRights[$moduleCode]['reference_id']);
+    
+            } else {
+                $siteCodes = empty($moduleRights[$moduleCode]['use_site']) ? [] : $moduleRights[$moduleCode]['use_site'];
+    
+                foreach ($rightValue as $siteCode => $right) {
+                    if (is_string($siteCode) && in_array($right, $siteCodes)) {
+                            $APPLICATION->SetGroupRight($moduleCode, $groupID, $right, $siteCode);
+                    
+                    } elseif (is_numeric($siteCode) && in_array($right, $moduleRights[$moduleCode]['reference_id'])) {
+                        $APPLICATION->SetGroupRight($moduleCode, $groupID, $right);
+                    }
+                }
+            }
+        }
+        if (!empty($tasksIds)) CGroup::SetTasks($groupID, $tasksIds);
+    }
+    
+    /**
+     * Создание пользовательских групп
+     * 
+     * @param string $constName - название константы
+     * @param array $optionValue - значение опции
+     * @return integer
+     * @throws
+     */
+    public function initUserGroupOptions(string $constName, array $optionValue)
+    {
+        $fields = [
+            'NAME' => self::checkLangCode($optionValue['LANG_CODE'], 'USER_GROUP', ['#GROUP#' => $constName]),
+            'DESCRIPTION' => empty($optionValue['DESCRIPTION_LANG_CODE']) ? ''
+                           : Loc::getMessage($optionValue['DESCRIPTION_LANG_CODE']),
+            'ACTIVE' => 'Y',
+            'STRING_ID' => constant($constName),
+            'C_SORT' => 100,
+            'SECURITY_POLICY' => serialize([]),
+        ];
+        
+        if (!empty($optionValue['SORT']) && (($sorValue = intval($optionValue['SORT'])) > 0))
+            $fields['C_SORT'] = $sorValue;
+
+        if (!empty($optionValue['USERIDS']) && defined($optionValue['USERIDS'])) {
+            $userIDs = constant($optionValue['USERIDS']);
+            if (!is_array($userIDs)) $userIDs = [$userIDs];
+
+            foreach ($userIDs  as $userID) {
+                $IDValue = $this->getCategoryIDByValue($userID, 'Users');
+                if ($IDValue === false) continue;
+
+                $fields['USER_ID'][] = $IDValue;
+            }
+        }
+
+        $group = new CGroup;
+        $groupID = $group->Add($fields);
+        if (!empty($group->LAST_ERROR))
+            throw new Exception(Loc::getMessage('ERROR_USER_GROUP_CREATING', ['#GROUP#' => $constName])
+                                . PHP_EOL . $group->LAST_ERROR);
+
+        if (!empty($optionValue['RIGHTS']) && is_array($optionValue['RIGHTS']))
+            self::setUserGroupRights($groupID, $optionValue['RIGHTS']);
+
+        return $groupID;
     }
 
     /**
@@ -284,6 +540,18 @@ class infoservice_testtask extends CModule
                 $this->moduleClassPath . '/error.php'
             );
         }
+    }
+
+    /**
+     * Удаление пользовательской группы
+     * 
+     * @param $constName - название константы
+     * @return void
+     */
+    public function removeUserGroupOptions(string $constName)
+    {
+        $groupID = $this->optionClass::getUserGroup(constant($constName));
+        if ($groupID) CGroup::Delete($groupID);
     }
 
     /**
